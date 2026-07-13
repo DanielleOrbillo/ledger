@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<meta name="theme-color" content="#161d1a" />
+<meta name="description" content="A beautiful offline-first weekly finance ledger. Track cash in and out, view week at a glance. All data stays on your device." />
+<title>The Ledger</title>
+
+<!-- PWA Manifest -->
+<link rel="manifest" href="manifest.json" />
+
+<!-- SVG Favicon -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%92%3C/text%3E%3C/svg%3E" />
+
+<style>
+  /* ===== CSS Variables ===== */
+  :root {
+    --ink: #161d1a;
+    --panel: #1c2321;
+    --paper: #e8e2d1;
+    --paper-bright: #f7f3ea;
+    --sage: #7c9885;
+    --clay: #c1666b;
+    --gold: #d4a574;
+    --line: rgba(232,226,209,0.08);
+    --focus-ring: 0 0 0 3px rgba(212,165,116,0.5);
+  }
+
+  /* ===== Reset & Base ===== */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: "SF Mono", "Courier New", monospace; }
+  .serif { font-family: Georgia, "Times New Roman", serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 28px 18px 40px; }
+
+  /* ===== Focus Visible (Phase 1) ===== */
+  *:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+  button, input, [tabindex] { transition: outline-offset 0.15s ease; }
+
+  /* ===== Screen Reader Only (Phase 1) ===== */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* ===== Header ===== */
+  .eyebrow { font-size: 10px; letter-spacing: 0.25em; color: var(--sage); margin-bottom: 8px; }
+  h1 { font-size: 30px; margin: 0; color: var(--paper-bright); letter-spacing: -0.01em; }
+  .header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; }
+  .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .reset-btn {
+    background: none; border: none; color: rgba(232,226,209,0.5); font-size: 11px;
+    letter-spacing: 0.05em; display: flex; align-items: center; gap: 5px; cursor: pointer;
+    padding: 4px 8px; border-radius: 6px;
+  }
+  .reset-btn:hover { color: var(--clay); background: rgba(193,102,107,0.1); }
+  .icon-btn {
+    background: none; border: 1px solid rgba(232,226,209,0.15); color: rgba(232,226,209,0.5);
+    border-radius: 6px; padding: 4px 8px; font-size: 11px; letter-spacing: 0.05em;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+  }
+  .icon-btn:hover { color: var(--gold); border-color: var(--gold); }
+
+  /* ===== Toast Notifications (Phase 3) ===== */
+  .toast-container {
+    position: fixed; top: 16px; right: 16px; z-index: 1000;
+    display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+  }
+  .toast {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; font-size: 13px; color: var(--paper);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    display: flex; align-items: center; gap: 10px; min-width: 260px; max-width: 340px;
+    pointer-events: all;
+    animation: toastIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .toast.toast-out { animation: toastOut 0.25s ease forwards; }
+  .toast.success { border-left: 3px solid var(--sage); }
+  .toast.error { border-left: 3px solid var(--clay); }
+  .toast.info { border-left: 3px solid var(--gold); }
+  .toast .toast-msg { flex: 1; }
+  .toast .toast-action {
+    background: none; border: none; color: var(--gold); font-size: 11px;
+    cursor: pointer; font-weight: 600; letter-spacing: 0.05em; padding: 2px 6px;
+  }
+  .toast .toast-close {
+    background: none; border: none; color: rgba(232,226,209,0.4); font-size: 14px;
+    cursor: pointer; padding: 2px;
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateX(40px) scale(0.95); }
+    to { opacity: 1; transform: translateX(0) scale(1); }
+  }
+  @keyframes toastOut {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(40px); }
+  }
+
+  /* ===== Confirmation Box ===== */
+  .confirm-box {
+    display: none; margin-bottom: 20px; border: 1px solid rgba(193,102,107,0.4);
+    background: rgba(193,102,107,0.1); border-radius: 10px; padding: 14px 16px;
+    align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .confirm-box.show { display: flex; }
+  .confirm-box p { margin: 0; font-size: 14px; flex: 1; min-width: 180px; }
+  .confirm-box .btns { display: flex; gap: 8px; }
+  .btn-ghost {
+    background: none; border: 1px solid rgba(232,226,209,0.2); color: var(--paper);
+    border-radius: 6px; padding: 6px 12px; font-size: 11px; cursor: pointer; font-family: inherit;
+  }
+  .btn-clay { background: var(--clay); border: none; color: var(--ink); border-radius: 6px;
+    padding: 6px 12px; font-size: 11px; cursor: pointer; font-weight: 600; }
+
+  /* ===== Storage Warning Banner (Phase 2) ===== */
+  .storage-warning {
+    display: none; margin-bottom: 16px; border: 1px solid rgba(212,165,116,0.4);
+    background: rgba(212,165,116,0.1); border-radius: 10px; padding: 10px 14px;
+    font-size: 12px; color: var(--gold); align-items: center; gap: 8px;
+  }
+  .storage-warning.show { display: flex; }
+
+  /* ===== Banner ===== */
+  .banner { position: relative; overflow: hidden; border-radius: 14px; border: 1px solid var(--line);
+    background: var(--panel); padding: 26px 24px; margin-bottom: 26px;
+    transition: border-color 0.3s ease; }
+  .banner:hover { border-color: rgba(212,165,116,0.15); }
+  .banner .eyebrow { display: flex; align-items: center; gap: 6px; color: rgba(232,226,209,0.4); }
+  .banner .total { font-size: 42px; letter-spacing: -0.02em; margin-top: 6px;
+    transition: color 0.3s ease; }
+  .pos { color: var(--sage); } .neg { color: var(--clay); }
+  .banner .subrow { display: flex; gap: 22px; margin-top: 14px; font-size: 12px; }
+  .banner .bigsymbol { position: absolute; right: -10px; bottom: -20px; font-size: 120px;
+    font-family: Georgia, serif; color: rgba(232,226,209,0.03); user-select: none; }
+
+  /* ===== Insights Bar (Phase 6) ===== */
+  .insights-bar {
+    display: none; margin-bottom: 20px; border: 1px solid var(--line);
+    background: var(--panel); border-radius: 10px; padding: 14px 16px;
+  }
+  .insights-bar.show { display: block; }
+  .insights-title { font-size: 10px; letter-spacing: 0.2em; color: var(--gold); margin-bottom: 8px; }
+  .insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .insight-item { font-size: 12px; }
+  .insight-label { color: rgba(232,226,209,0.45); margin-bottom: 2px; }
+  .insight-value { font-size: 14px; font-weight: 600; }
+
+  /* ===== Tabs (Phase 1 + 4 ARIA) ===== */
+  .tabs { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; margin-bottom: 1px; }
+  .tab { flex: 1; min-width: 58px; text-align: center; padding: 10px 4px; border-radius: 8px 8px 0 0;
+    border-bottom: 2px solid transparent; background: transparent; cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease; }
+  .tab:hover { background: rgba(28,35,33,0.5); }
+  .tab[aria-selected="true"] { background: var(--panel); border-bottom-color: var(--gold); }
+  .tab .d { font-size: 11px; letter-spacing: 0.03em; color: rgba(232,226,209,0.45); font-family: monospace;
+    transition: color 0.2s ease; }
+  .tab[aria-selected="true"] .d { color: var(--paper-bright); }
+  .tab .dot { width: 4px; height: 4px; border-radius: 50%; margin: 6px auto 0; background: transparent;
+    transition: background 0.2s ease; }
+  .tab .dot.has { background: var(--gold); }
+  .tab .date-hint { font-size: 9px; color: rgba(232,226,209,0.25); margin-top: 2px; font-family: monospace; }
+
+  /* ===== Panel ===== */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 0 10px 10px 10px;
+    padding: 22px; margin-bottom: 26px;
+    animation: panelFade 0.25s ease; }
+  @keyframes panelFade {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .panel-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+  .panel-head h2 { font-size: 21px; margin: 0; color: var(--paper-bright); font-weight: normal; }
+  .panel-date { font-size: 11px; color: rgba(232,226,209,0.35); font-family: monospace; }
+
+  .cols { display: grid; grid-template-columns: 1fr; gap: 20px; }
+  @media (min-width: 620px) { .cols { grid-template-columns: 1fr 1fr; } }
+
+  .col-label { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.15em;
+    margin-bottom: 8px; }
+  .col-label.in { color: var(--sage); } .col-label.out { color: var(--clay); }
+
+  /* ===== Entry List (Phase 3 animations) ===== */
+  .list { border-radius: 8px; background: rgba(22,29,26,0.6);
+    background-image: repeating-linear-gradient(to bottom, transparent, transparent 33px, rgba(232,226,209,0.05) 33px, rgba(232,226,209,0.05) 34px);
+    min-height: 44px; margin-bottom: 10px; max-height: 220px; overflow-y: auto;
+    scroll-behavior: smooth; }
+  .empty { font-size: 12px; font-style: italic; color: rgba(232,226,209,0.3); padding: 12px; }
+
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 10px; height: 34px;
+    animation: rowIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: 4px; margin: 0 2px;
+    transition: background 0.15s ease;
+  }
+  .row:hover { background: rgba(232,226,209,0.04); }
+  @keyframes rowIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .row .label { font-size: 14px; color: rgba(232,226,209,0.85); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; padding-right: 8px; cursor: pointer; }
+  .row .label:hover { color: var(--paper-bright); }
+  .row .right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .row .amt { font-size: 13px; }
+
+  /* Action buttons on rows */
+  .row-actions { display: flex; align-items: center; gap: 2px; opacity: 0;
+    transition: opacity 0.15s ease; }
+  .row:hover .row-actions { opacity: 1; }
+  @media (hover: none) { .row-actions { opacity: 1; } }
+
+  .row-btn {
+    background: none; border: none; color: rgba(232,226,209,0.3); cursor: pointer;
+    padding: 4px; font-size: 12px; line-height: 1; border-radius: 4px;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .row-btn:hover { color: var(--paper-bright); background: rgba(232,226,209,0.08); }
+  .row-btn.edit:hover { color: var(--gold); }
+  .row-btn.del:hover { color: var(--clay); background: rgba(193,102,107,0.15); }
+
+  /* Inline editing (Phase 3) */
+  .row-editing {
+    display: flex; align-items: center; gap: 4px; padding: 2px 6px; height: 34px;
+  }
+  .row-editing input {
+    font-family: inherit; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 4px; color: var(--paper); padding: 4px 6px; font-size: 13px;
+  }
+  .row-editing input.txt { flex: 1; min-width: 0; }
+  .row-editing input.num { width: 70px; font-family: monospace; }
+  .row-editing .row-btn { opacity: 1; }
+
+  /* ===== Inputs ===== */
+  .input-row { display: flex; gap: 6px; }
+  .input-row input { font-family: inherit; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--paper); padding: 9px 10px; font-size: 14px; }
+  .input-row input::placeholder { color: rgba(232,226,209,0.25); }
+  .input-row input:focus { border-color: rgba(212,165,116,0.4); }
+  .input-row .txt { flex: 1; min-width: 0; }
+  .input-row .num { width: 62px; font-family: monospace; }
+  .add-btn { flex-shrink: 0; width: 36px; height: 36px; border-radius: 6px; border: none;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; }
+  .add-btn.in { background: rgba(124,152,133,0.2); color: var(--sage); }
+  .add-btn.in:hover { background: rgba(124,152,133,0.35); }
+  .add-btn.out { background: rgba(193,102,107,0.2); color: var(--clay); }
+  .add-btn.out:hover { background: rgba(193,102,107,0.35); }
+
+  /* ===== Recurring Toggle (Phase 6) ===== */
+  .recurring-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .recurring-row label { font-size: 11px; color: rgba(232,226,209,0.4); cursor: pointer;
+    display: flex; align-items: center; gap: 4px; user-select: none; }
+  .recurring-row input[type="checkbox"] {
+    accent-color: var(--gold); width: 14px; height: 14px; cursor: pointer;
+  }
+
+  /* ===== Currency Selector (Phase 6) ===== */
+  .currency-select {
+    background: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--paper); padding: 4px 8px; font-size: 12px; font-family: monospace;
+    cursor: pointer;
+  }
+
+  /* ===== Week at a Glance (Phase 6 - 3-state differentiation) ===== */
+  .glance-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .glance-label { font-size: 11px; letter-spacing: 0.15em; color: rgba(232,226,209,0.4); }
+  .glance-toggle {
+    background: none; border: 1px solid rgba(232,226,209,0.15); border-radius: 6px;
+    color: rgba(232,226,209,0.4); font-size: 10px; padding: 3px 8px; cursor: pointer;
+    letter-spacing: 0.05em;
+  }
+  .glance-toggle:hover { color: var(--gold); border-color: var(--gold); }
+  .glance { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 20px; }
+  .glance-day { border-radius: 6px; border: 1px solid var(--line);
+    background: rgba(28,35,33,0.5); text-align: center; padding: 9px 2px; cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease; position: relative; }
+  .glance-day:hover { border-color: rgba(212,165,116,0.3); background: rgba(28,35,33,0.7); }
+  .glance-day.active { border-color: rgba(212,165,116,0.5); background: var(--panel); }
+  .glance-day .gd { font-size: 9px; font-family: monospace; color: rgba(232,226,209,0.4); margin-bottom: 3px; }
+  .glance-day .gv { font-size: 10px; font-family: monospace; }
+
+  /* 3-state differentiation */
+  .glance-day.state-empty .gv { color: rgba(232,226,209,0.15); }
+  .glance-day.state-zero .gv { color: rgba(232,226,209,0.5); }
+  .glance-day.state-positive { border-color: rgba(124,152,133,0.25); }
+  .glance-day.state-positive .gv { color: var(--sage); }
+  .glance-day.state-negative { border-color: rgba(193,102,107,0.25); }
+  .glance-day.state-negative .gv { color: var(--clay); }
+  .glance-day .state-arrow { font-size: 8px; margin-right: 1px; }
+
+  /* Zero-badge for empty data days that have recurring */
+  .glance-day .recurring-badge { position: absolute; top: 2px; right: 2px; width: 5px; height: 5px;
+    border-radius: 50%; background: var(--gold); opacity: 0.6; }
+
+  /* ===== Modal (Phase 3 - Edit Entry) ===== */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 900;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+    backdrop-filter: blur(4px);
+  }
+  .modal-overlay.show { display: flex; animation: modalIn 0.2s ease; }
+  @keyframes modalIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 24px; max-width: 400px; width: 100%;
+    animation: modalSlide 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes modalSlide {
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .modal h3 { margin: 0 0 16px; font-size: 18px; color: var(--paper-bright); font-weight: normal; }
+  .modal-body { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+  .modal-body label { font-size: 11px; letter-spacing: 0.1em; color: rgba(232,226,209,0.5); }
+  .modal-body input {
+    font-family: inherit; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--paper); padding: 10px 12px; font-size: 14px; width: 100%;
+  }
+  .modal-body input:focus { border-color: rgba(212,165,116,0.4); }
+  .modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* ===== Footer (Phase 1 - improved contrast + Phase 2 last saved) ===== */
+  .footer { text-align: center; font-size: 10px; letter-spacing: 0.03em;
+    color: rgba(232,226,209,0.45); font-family: monospace; line-height: 1.6; }
+  .footer .last-saved { color: rgba(232,226,209,0.3); }
+
+  /* ===== Scrollbar ===== */
+  .list::-webkit-scrollbar { width: 6px; }
+  .list::-webkit-scrollbar-track { background: transparent; }
+  .list::-webkit-scrollbar-thumb { background: rgba(232,226,209,0.1); border-radius: 3px; }
+  .list::-webkit-scrollbar-thumb:hover { background: rgba(232,226,209,0.2); }
+
+  /* ===== Reduced Motion ===== */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Toast Container (Phase 3) -->
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+<!-- Modal Overlay (Phase 3 - Edit Entry) -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h3 class="serif" id="modalTitle">Edit Entry</h3>
+    <div class="modal-body">
+      <div>
+        <label class="mono">LABEL</label>
+        <input type="text" id="modalLabel" />
+      </div>
+      <div>
+        <label class="mono">AMOUNT</label>
+        <input type="text" id="modalAmount" inputmode="decimal" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost mono" data-action="modal-cancel">CANCEL</button>
+      <button class="btn-clay mono" data-action="modal-save">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <!-- Header -->
+  <div class="header-row">
+    <div>
+      <div class="eyebrow mono" id="weekOfLabel">WEEK OF —</div>
+      <h1 class="serif">The Ledger</h1>
+    </div>
+    <div class="header-actions">
+      <select class="currency-select mono" id="currencySelect" data-action="change-currency" aria-label="Select currency">
+        <option value="PHP">₱ PHP</option>
+        <option value="USD">$ USD</option>
+        <option value="EUR">€ EUR</option>
+        <option value="GBP">£ GBP</option>
+        <option value="JPY">¥ JPY</option>
+        <option value="KRW">₩ KRW</option>
+        <option value="INR">₹ INR</option>
+        <option value="CNY">¥ CNY</option>
+        <option value="THB">฿ THB</option>
+        <option value="VND">₫ VND</option>
+      </select>
+      <button class="icon-btn mono" data-action="export-data" title="Export data">↓ EXPORT</button>
+      <button class="icon-btn mono" data-action="import-data" title="Import data">↑ IMPORT</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" />
+      <button class="reset-btn mono" data-action="show-reset">↺ NEW WEEK</button>
+    </div>
+  </div>
+
+  <!-- Storage Warning (Phase 2) -->
+  <div class="storage-warning mono" id="storageWarning" role="alert">
+    <span>⚠</span> <span id="storageWarningText">Storage is getting full.</span>
+  </div>
+
+  <!-- Reset Confirmation -->
+  <div class="confirm-box" id="confirmBox">
+    <p>Start a new week? This clears all entries for every day.</p>
+    <div class="btns">
+      <button class="btn-ghost mono" data-action="hide-reset">CANCEL</button>
+      <button class="btn-clay mono" data-action="reset-week">CLEAR IT</button>
+    </div>
+  </div>
+
+  <!-- Banner -->
+  <div class="banner">
+    <div class="eyebrow mono">💰 WHAT'S LEFT THIS WEEK</div>
+    <div class="total mono" id="weekTotal">₱0.00</div>
+    <div class="subrow mono">
+      <span class="pos">↑ IN <span id="weekIn">₱0.00</span></span>
+      <span class="neg">↓ OUT <span id="weekOut">₱0.00</span></span>
+    </div>
+    <div class="bigsymbol" id="bannerSymbol">₱</div>
+  </div>
+
+  <!-- Insights Bar (Phase 6) -->
+  <div class="insights-bar" id="insightsBar">
+    <div class="insights-title mono">📊 WEEK INSIGHTS</div>
+    <div class="insights-grid" id="insightsGrid"></div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs" id="tabs" role="tablist" aria-label="Days of the week"></div>
+
+  <!-- Panel -->
+  <div class="panel" id="dayPanel" role="tabpanel" aria-labelledby="activeDayLabel">
+    <div class="panel-head">
+      <div>
+        <h2 class="serif" id="activeDayLabel">Monday</h2>
+        <div class="panel-date mono" id="activeDayDate">—</div>
+      </div>
+      <span class="mono" id="activeDayNet">₱0.00</span>
+    </div>
+    <div class="cols">
+      <!-- Cash In -->
+      <div>
+        <div class="col-label in mono"><span>CASH IN</span><span id="inSubtotal">₱0.00</span></div>
+        <div class="list" id="cashInList"></div>
+        <div class="input-row">
+          <label class="sr-only" for="inLabel">Income source</label>
+          <input class="txt" id="inLabel" placeholder="Source (e.g. Scenthread sale)" autocomplete="off" />
+          <label class="sr-only" for="inAmount">Income amount</label>
+          <input class="num" id="inAmount" placeholder="₱" inputmode="decimal" autocomplete="off" />
+          <button class="add-btn in" data-action="add-cash-in" aria-label="Add income entry">+</button>
+        </div>
+        <div class="recurring-row">
+          <label><input type="checkbox" id="inRecurring" /> <span class="mono">RECURRING WEEKLY</span></label>
+        </div>
+      </div>
+      <!-- Cash Out -->
+      <div>
+        <div class="col-label out mono"><span>CASH OUT</span><span id="outSubtotal">₱0.00</span></div>
+        <div class="list" id="cashOutList"></div>
+        <div class="input-row">
+          <label class="sr-only" for="outLabel">Expense description</label>
+          <input class="txt" id="outLabel" placeholder="Where it went (e.g. Jeepney fare)" autocomplete="off" />
+          <label class="sr-only" for="outAmount">Expense amount</label>
+          <input class="num" id="outAmount" placeholder="₱" inputmode="decimal" autocomplete="off" />
+          <button class="add-btn out" data-action="add-cash-out" aria-label="Add expense entry">+</button>
+        </div>
+        <div class="recurring-row">
+          <label><input type="checkbox" id="outRecurring" /> <span class="mono">RECURRING WEEKLY</span></label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Week at a Glance -->
+  <div class="glance-header">
+    <div class="glance-label mono">WEEK AT A GLANCE</div>
+    <button class="glance-toggle mono" data-action="toggle-insights">INSIGHTS</button>
+  </div>
+  <div class="glance" id="glance"></div>
+
+  <!-- Footer -->
+  <div class="footer" id="footer">
+    SAVED ON THIS DEVICE ONLY · WORKS OFFLINE<br />
+    <span class="last-saved" id="lastSaved"></span>
+  </div>
+</div>
+
+<script>
+
+// ==========================================
+// THE LEDGER — Complete Implementation
+// Phases 1-6: Foundation, Safety, UX Polish,
+// Architecture, PWA, Advanced Features
+// ==========================================
+
+// ===== Constants =====
+const DAYS = [
+  { key: "mon", label: "Monday", short: "Mon" },
+  { key: "tue", label: "Tuesday", short: "Tue" },
+  { key: "wed", label: "Wednesday", short: "Wed" },
+  { key: "thu", label: "Thursday", short: "Thu" },
+  { key: "fri", label: "Friday", short: "Fri" },
+  { key: "sat", label: "Saturday", short: "Sat" },
+  { key: "sun", label: "Sunday", short: "Sun" },
+];
+const STORAGE_KEY = "ledger-data-v2";
+const CURRENCY_KEY = "ledger-currency";
+
+const CURRENCY_MAP = {
+  PHP: { symbol: "₱", locale: "en-PH" },
+  USD: { symbol: "$", locale: "en-US" },
+  EUR: { symbol: "€", locale: "en-DE" },
+  GBP: { symbol: "£", locale: "en-GB" },
+  JPY: { symbol: "¥", locale: "ja-JP" },
+  KRW: { symbol: "₩", locale: "ko-KR" },
+  INR: { symbol: "₹", locale: "en-IN" },
+  CNY: { symbol: "¥", locale: "zh-CN" },
+  THB: { symbol: "฿", locale: "th-TH" },
+  VND: { symbol: "₫", locale: "vi-VN" },
+};
+
+// ===== Phase 1: Fixed week anchor — always starts on Monday =====
+function getMondayOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay(); // 0=Sun, 1=Mon, ...
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function emptyWeek() {
+  const w = {};
+  DAYS.forEach(d => w[d.key] = { cashIn: [], cashOut: [] });
+  return w;
+}
+
+// ===== Phase 2: Safe localStorage with error handling =====
+function safeSetItem(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    if (e.name === "QuotaExceededError") {
+      showToast("Storage is full. Export & clear old data.", "error", 6000);
+    } else {
+      showToast("Changes could not be saved.", "error");
+    }
+    console.error("localStorage save failed:", e);
+    return false;
+  }
+}
+
+function safeGetItem(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    console.error("localStorage read failed:", e);
+    return null;
+  }
+}
+
+// Check storage quota (approximate)
+function checkStorage() {
+  try {
+    const used = JSON.stringify(localStorage).length;
+    const max = 5 * 1024 * 1024; // ~5MB typical limit
+    const pct = (used / max) * 100;
+    const warning = document.getElementById("storageWarning");
+    const warningText = document.getElementById("storageWarningText");
+    if (pct > 85) {
+      warning.classList.add("show");
+      warningText.textContent = `Storage ${pct.toFixed(0)}% full. Consider exporting & clearing.`;
+    } else {
+      warning.classList.remove("show");
+    }
+  } catch (e) {}
+}
+
+// ===== Phase 1 + 4: State Management with dispatch pattern =====
+let state = loadState();
+let activeDay = "mon";
+let insightsVisible = false;
+let undoStack = []; // Phase 3: Undo system
+let editingEntry = null; // Phase 3: Track entry being edited
+
+function loadState() {
+  try {
+    const raw = safeGetItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const week = parsed.week || emptyWeek();
+      // Phase 1: Fix weekStarted to be Monday if it's not
+      let weekStarted = parsed.weekStarted;
+      if (weekStarted) {
+        const savedMonday = getMondayOfWeek(new Date(weekStarted));
+        weekStarted = savedMonday.toISOString();
+      } else {
+        weekStarted = getMondayOfWeek(new Date()).toISOString();
+      }
+      // Phase 6: Load recurring entries
+      const recurring = parsed.recurring || { cashIn: [], cashOut: [] };
+      const currency = parsed.currency || "PHP";
+      return { week, weekStarted, recurring, currency };
+    }
+  } catch (e) {
+    console.error("Failed to load state:", e);
+  }
+  return {
+    week: emptyWeek(),
+    weekStarted: getMondayOfWeek(new Date()).toISOString(),
+    recurring: { cashIn: [], cashOut: [] },
+    currency: safeGetItem(CURRENCY_KEY) || "PHP",
+  };
+}
+
+function saveState() {
+  const payload = JSON.stringify({
+    week: state.week,
+    weekStarted: state.weekStarted,
+    recurring: state.recurring,
+  });
+  const ok = safeSetItem(STORAGE_KEY, payload);
+  if (ok) {
+    safeSetItem(CURRENCY_KEY, state.currency);
+    updateLastSaved();
+    checkStorage();
+  }
+  return ok;
+}
+
+function updateLastSaved() {
+  const el = document.getElementById("lastSaved");
+  const now = new Date();
+  el.textContent = "Last saved: " + now.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" });
+}
+
+// ===== Phase 1: Strict amount validation =====
+function validateAmount(value) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  // Reject non-numeric strings that parseFloat would coerce
+  if (!/^-?\d+(\.\d{1,2})?$/.test(str)) return null;
+  const num = parseFloat(str);
+  if (isNaN(num) || !isFinite(num) || num <= 0) return null;
+  // Round to 2 decimal places
+  return Math.round(num * 100) / 100;
+}
+
+// ===== Currency formatting =====
+function formatCurrency(n) {
+  const cfg = CURRENCY_MAP[state.currency] || CURRENCY_MAP.PHP;
+  const abs = Math.abs(n);
+  return cfg.symbol + abs.toLocaleString(cfg.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getCurrencySymbol() {
+  return (CURRENCY_MAP[state.currency] || CURRENCY_MAP.PHP).symbol;
+}
+
+// ===== Computations =====
+function dayTotal(key) {
+  const d = state.week[key];
+  const cashIn = d.cashIn.reduce((s, e) => s + e.amount, 0);
+  const cashOut = d.cashOut.reduce((s, e) => s + e.amount, 0);
+  return { cashIn, cashOut, net: cashIn - cashOut };
+}
+
+function weekTotals() {
+  let cashIn = 0, cashOut = 0;
+  DAYS.forEach(d => {
+    const t = dayTotal(d.key);
+    cashIn += t.cashIn; cashOut += t.cashOut;
+  });
+  return { cashIn, cashOut, net: cashIn - cashOut };
+}
+
+// ===== Phase 6: Compute week insights =====
+function computeInsights() {
+  const totals = weekTotals();
+  // Day with highest spending
+  let maxSpendDay = null, maxSpend = 0;
+  let maxEarnDay = null, maxEarn = 0;
+  let bestNetDay = null, bestNet = -Infinity;
+  let worstNetDay = null, worstNet = Infinity;
+  const dayStats = DAYS.map(d => {
+    const t = dayTotal(d.key);
+    return { ...d, ...t };
+  });
+  dayStats.forEach(d => {
+    if (d.cashOut > maxSpend) { maxSpend = d.cashOut; maxSpendDay = d.label; }
+    if (d.cashIn > maxEarn) { maxEarn = d.cashIn; maxEarnDay = d.label; }
+    if (d.net > bestNet) { bestNet = d.net; bestNetDay = d.label; }
+    if (d.net < worstNet) { worstNet = d.net; worstNetDay = d.label; }
+  });
+  const avgDailySpend = maxSpend > 0 ? (totals.cashOut / dayStats.filter(d => d.cashOut > 0).length || 1) : 0;
+  return { maxSpendDay, maxEarnDay, bestNetDay, worstNetDay, avgDailySpend, totals };
+}
+
+// ===== Phase 6: Get calendar date for a day key =====
+function getDayCalendarDate(dayKey) {
+  const monday = getMondayOfWeek(new Date(state.weekStarted));
+  const dayIndex = DAYS.findIndex(d => d.key === dayKey);
+  const date = new Date(monday);
+  date.setDate(monday.getDate() + dayIndex);
+  return date;
+}
+
+// ===== Phase 3: Toast notification system =====
+let toastIdCounter = 0;
+function showToast(message, type = "info", duration = 3500, actionText = null, actionCallback = null) {
+  const container = document.getElementById("toastContainer");
+  const id = "toast-" + (++toastIdCounter);
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.id = id;
+  let actionHtml = "";
+  if (actionText && actionCallback) {
+    actionHtml = `<button class="toast-action mono" data-toast-action="${id}">${actionText}</button>`;
+    toast._actionCallback = actionCallback;
+  }
+  toast.innerHTML = `
+    <span class="toast-msg">${escapeHtml(message)}</span>
+    ${actionHtml}
+    <button class="toast-close" data-toast-close="${id}">✕</button>
+  `;
+  container.appendChild(toast);
+
+  // Auto-dismiss
+  const timer = setTimeout(() => dismissToast(id), duration);
+  toast._timer = timer;
+}
+
+function dismissToast(id) {
+  const toast = document.getElementById(id);
+  if (!toast) return;
+  clearTimeout(toast._timer);
+  toast.classList.add("toast-out");
+  setTimeout(() => toast.remove(), 300);
+}
+
+// ===== Phase 3: Undo system =====
+function pushUndo(day, type, entry) {
+  undoStack.push({ day, type, entry, timestamp: Date.now() });
+  if (undoStack.length > 20) undoStack.shift(); // Limit stack
+}
+
+function popUndo() {
+  const action = undoStack.pop();
+  if (!action) return false;
+  state.week[action.day][action.type].push(action.entry);
+  saveState();
+  if (activeDay === action.day) {
+    renderDayPanel();
+    renderTabs();
+    renderGlance();
+  } else {
+    renderAll();
+  }
+  return true;
+}
+
+// ===== Phase 6: ID generation =====
+function generateId() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 9);
+}
+
+// ===== Actions (Phase 4: Centralized dispatch) =====
+function dispatch(action, payload) {
+  switch (action) {
+    case "ADD_ENTRY": {
+      const { type } = payload;
+      const labelEl = document.getElementById(type === "cashIn" ? "inLabel" : "outLabel");
+      const amountEl = document.getElementById(type === "cashIn" ? "inAmount" : "outAmount");
+      const recurringEl = document.getElementById(type === "cashIn" ? "inRecurring" : "outRecurring");
+      const label = labelEl.value.trim();
+      const amount = validateAmount(amountEl.value);
+      if (!label) {
+        showToast("Please enter a description.", "error");
+        labelEl.focus();
+        return;
+      }
+      if (amount === null) {
+        showToast("Please enter a valid positive amount (up to 2 decimal places).", "error");
+        amountEl.focus();
+        return;
+      }
+      const entry = { id: generateId(), label, amount, createdAt: new Date().toISOString() };
+      state.week[activeDay][type].push(entry);
+      // Phase 6: Handle recurring
+      if (recurringEl && recurringEl.checked) {
+        state.recurring[type].push({ label, amount });
+        recurringEl.checked = false;
+        showToast("Added as recurring weekly entry.", "info", 2500);
+      }
+      labelEl.value = "";
+      amountEl.value = "";
+      saveState();
+      renderDayPanel();
+      renderBanner();
+      renderTabs();
+      renderGlance();
+      renderInsights();
+      showToast(`${type === "cashIn" ? "Income" : "Expense"} added: ${formatCurrency(amount)}`, "success", 2500);
+      // Auto-scroll to bottom
+      setTimeout(() => {
+        const list = document.getElementById(type === "cashIn" ? "cashInList" : "cashOutList");
+        if (list) list.scrollTop = list.scrollHeight;
+      }, 50);
+      labelEl.focus();
+      break;
+    }
+    case "REMOVE_ENTRY": {
+      const { type, id } = payload;
+      const entry = state.week[activeDay][type].find(e => e.id === id);
+      if (entry) {
+        pushUndo(activeDay, type, entry);
+        state.week[activeDay][type] = state.week[activeDay][type].filter(e => e.id !== id);
+        saveState();
+        renderDayPanel();
+        renderBanner();
+        renderTabs();
+        renderGlance();
+        renderInsights();
+        showToast("Entry removed", "info", 4000, "UNDO", () => {
+          const ok = popUndo();
+          if (ok) showToast("Entry restored", "success", 2000);
+        });
+      }
+      break;
+    }
+    case "START_EDIT": {
+      const { type, id } = payload;
+      const entry = state.week[activeDay][type].find(e => e.id === id);
+      if (!entry) return;
+      editingEntry = { type, id };
+      document.getElementById("modalTitle").textContent = "Edit Entry";
+      document.getElementById("modalLabel").value = entry.label;
+      document.getElementById("modalAmount").value = entry.amount.toFixed(2);
+      document.getElementById("modalOverlay").classList.add("show");
+      setTimeout(() => document.getElementById("modalLabel").focus(), 100);
+      break;
+    }
+    case "SAVE_EDIT": {
+      if (!editingEntry) return;
+      const label = document.getElementById("modalLabel").value.trim();
+      const amount = validateAmount(document.getElementById("modalAmount").value);
+      if (!label) { showToast("Please enter a description.", "error"); return; }
+      if (amount === null) { showToast("Invalid amount.", "error"); return; }
+      const entries = state.week[activeDay][editingEntry.type];
+      const entry = entries.find(e => e.id === editingEntry.id);
+      if (entry) {
+        entry.label = label;
+        entry.amount = amount;
+        entry.updatedAt = new Date().toISOString();
+        saveState();
+        renderDayPanel();
+        renderBanner();
+        renderGlance();
+        renderInsights();
+        showToast("Entry updated", "success", 2000);
+      }
+      editingEntry = null;
+      document.getElementById("modalOverlay").classList.remove("show");
+      break;
+    }
+    case "CANCEL_EDIT": {
+      editingEntry = null;
+      document.getElementById("modalOverlay").classList.remove("show");
+      break;
+    }
+    case "SET_DAY": {
+      activeDay = payload.day;
+      renderAll();
+      break;
+    }
+    case "SHOW_RESET": {
+      document.getElementById("confirmBox").classList.add("show");
+      break;
+    }
+    case "HIDE_RESET": {
+      document.getElementById("confirmBox").classList.remove("show");
+      break;
+    }
+    case "RESET_WEEK": {
+      // Phase 6: Apply recurring entries to new week
+      const newWeek = emptyWeek();
+      DAYS.forEach(d => {
+        state.recurring.cashIn.forEach(r => {
+          newWeek[d.key].cashIn.push({ id: generateId(), label: r.label, amount: r.amount, recurring: true });
+        });
+        state.recurring.cashOut.forEach(r => {
+          newWeek[d.key].cashOut.push({ id: generateId(), label: r.label, amount: r.amount, recurring: true });
+        });
+      });
+      state.week = newWeek;
+      state.weekStarted = getMondayOfWeek(new Date()).toISOString();
+      activeDay = "mon";
+      undoStack = [];
+      document.getElementById("confirmBox").classList.remove("show");
+      saveState();
+      renderAll();
+      const hasRecurring = state.recurring.cashIn.length + state.recurring.cashOut.length;
+      if (hasRecurring > 0) {
+        showToast(`New week started with ${hasRecurring} recurring entries applied.`, "success", 3000);
+      } else {
+        showToast("New week started.", "success", 2000);
+      }
+      break;
+    }
+    case "EXPORT": {
+      const data = {
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        week: state.week,
+        weekStarted: state.weekStarted,
+        recurring: state.recurring,
+        currency: state.currency,
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `ledger-${dateStr}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Data exported successfully.", "success", 2500);
+      break;
+    }
+    case "IMPORT": {
+      document.getElementById("importFile").click();
+      break;
+    }
+    case "IMPORT_FILE": {
+      const file = payload.file;
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const data = JSON.parse(e.target.result);
+          // Schema validation
+          if (!data.week || typeof data.week !== "object") throw new Error("Invalid file: missing week data");
+          DAYS.forEach(d => {
+            if (!data.week[d.key]) throw new Error(`Invalid file: missing ${d.label}`);
+          });
+          // Merge or replace
+          if (payload.merge) {
+            // Simple merge: add entries that don't exist by ID
+            DAYS.forEach(d => {
+              const existingIds = new Set(state.week[d.key].cashIn.map(x => x.id).concat(state.week[d.key].cashOut.map(x => x.id)));
+              (data.week[d.key].cashIn || []).forEach(entry => {
+                if (!existingIds.has(entry.id)) state.week[d.key].cashIn.push(entry);
+              });
+              (data.week[d.key].cashOut || []).forEach(entry => {
+                if (!existingIds.has(entry.id)) state.week[d.key].cashOut.push(entry);
+              });
+            });
+            showToast("Data merged successfully.", "success", 2500);
+          } else {
+            state.week = data.week;
+            if (data.weekStarted) state.weekStarted = data.weekStarted;
+            if (data.recurring) state.recurring = data.recurring;
+            if (data.currency) state.currency = data.currency;
+            showToast("Data imported successfully.", "success", 2500);
+          }
+          saveState();
+          renderAll();
+        } catch (err) {
+          showToast("Import failed: " + err.message, "error", 4000);
+        }
+      };
+      reader.readAsText(file);
+      break;
+    }
+    case "CHANGE_CURRENCY": {
+      state.currency = payload.currency;
+      document.getElementById("bannerSymbol").textContent = getCurrencySymbol();
+      saveState();
+      renderAll();
+      showToast(`Currency set to ${payload.currency}`, "info", 2000);
+      break;
+    }
+    case "TOGGLE_INSIGHTS": {
+      insightsVisible = !insightsVisible;
+      const bar = document.getElementById("insightsBar");
+      bar.classList.toggle("show", insightsVisible);
+      if (insightsVisible) renderInsights();
+      break;
+    }
+  }
+}
+
+// ===== Phase 4: Split render into discrete functions =====
+function renderBanner() {
+  const started = new Date(state.weekStarted);
+  document.getElementById("weekOfLabel").textContent = "WEEK OF " + started.toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
+
+  const wt = weekTotals();
+  const wtEl = document.getElementById("weekTotal");
+  const oldVal = wtEl.textContent;
+  const newVal = (wt.net < 0 ? "−" : "") + formatCurrency(wt.net);
+  wtEl.textContent = newVal;
+  wtEl.className = "total mono " + (wt.net >= 0 ? "pos" : "neg");
+  document.getElementById("weekIn").textContent = formatCurrency(wt.cashIn);
+  document.getElementById("weekOut").textContent = formatCurrency(wt.cashOut);
+}
+
+function renderTabs() {
+  const tabsEl = document.getElementById("tabs");
+  tabsEl.innerHTML = DAYS.map((d, i) => {
+    const has = state.week[d.key].cashIn.length || state.week[d.key].cashOut.length;
+    const isActive = d.key === activeDay;
+    const date = getDayCalendarDate(d.key);
+    const dateStr = date.getDate();
+    return `<div class="tab ${isActive ? 'active' : ''}" 
+      role="tab" 
+      aria-selected="${isActive}" 
+      aria-controls="dayPanel"
+      id="tab-${d.key}"
+      tabindex="${isActive ? 0 : -1}"
+      data-action="set-day" 
+      data-day="${d.key}">
+      <div class="d">${d.short.toUpperCase()}</div>
+      <div class="dot ${has ? 'has' : ''}"></div>
+      <div class="date-hint">${dateStr}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderDayPanel() {
+  const meta = DAYS.find(d => d.key === activeDay);
+  document.getElementById("activeDayLabel").textContent = meta.label;
+  // Phase 3: Show actual calendar date
+  const calDate = getDayCalendarDate(activeDay);
+  document.getElementById("activeDayDate").textContent = calDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+
+  const at = dayTotal(activeDay);
+  const netEl = document.getElementById("activeDayNet");
+  netEl.textContent = (at.net < 0 ? "−" : "") + formatCurrency(at.net);
+  netEl.className = "mono " + (at.net >= 0 ? "pos" : "neg");
+  document.getElementById("inSubtotal").textContent = formatCurrency(at.cashIn);
+  document.getElementById("outSubtotal").textContent = formatCurrency(at.cashOut);
+
+  renderEntryList("cashInList", "cashIn");
+  renderEntryList("cashOutList", "cashOut");
+}
+
+function renderEntryList(containerId, type) {
+  const container = document.getElementById(containerId);
+  const entries = state.week[activeDay][type];
+  if (entries.length === 0) {
+    container.innerHTML = `<div class="empty">${type === "cashIn" ? "No earnings logged yet." : "No spending logged yet."}</div>`;
+    return;
+  }
+  container.innerHTML = entries.map(e => {
+    const sign = type === 'cashIn' ? '+' : '−';
+    const cls = type === 'cashIn' ? 'pos' : 'neg';
+    const recurringBadge = e.recurring ? '<span title="Recurring">↻</span> ' : '';
+    return `
+      <div class="row" data-entry-id="${e.id}" data-entry-type="${type}">
+        <span class="label" data-action="edit-entry" data-type="${type}" data-id="${e.id}">${recurringBadge}${escapeHtml(e.label)}</span>
+        <div class="right">
+          <span class="amt mono ${cls}">${sign}${formatCurrency(e.amount)}</span>
+          <div class="row-actions">
+            <button class="row-btn edit" data-action="edit-entry" data-type="${type}" data-id="${e.id}" aria-label="Edit ${escapeHtml(e.label)}">✎</button>
+            <button class="row-btn del" data-action="remove-entry" data-type="${type}" data-id="${e.id}" aria-label="Delete ${escapeHtml(e.label)}">✕</button>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+// Phase 6: 3-state glance differentiation
+function renderGlance() {
+  const glanceEl = document.getElementById("glance");
+  glanceEl.innerHTML = DAYS.map(d => {
+    const t = dayTotal(d.key);
+    const hasEntries = state.week[d.key].cashIn.length || state.week[d.key].cashOut.length;
+    const hasRecurring = state.week[d.key].cashIn.some(e => e.recurring) || state.week[d.key].cashOut.some(e => e.recurring);
+    let valStr, cls, stateClass;
+    if (!hasEntries) {
+      valStr = "—";
+      cls = "";
+      stateClass = "state-empty";
+    } else if (t.net === 0) {
+      valStr = formatCurrency(0);
+      cls = "";
+      stateClass = "state-zero";
+    } else {
+      const arrow = t.net > 0 ? "▲" : "▼";
+      valStr = arrow + " " + (t.net < 0 ? "−" : "") + formatCurrency(t.net);
+      cls = t.net >= 0 ? "pos" : "neg";
+      stateClass = t.net >= 0 ? "state-positive" : "state-negative";
+    }
+    const recurringBadge = hasRecurring ? '<div class="recurring-badge" title="Has recurring entries"></div>' : '';
+    return `<div class="glance-day ${d.key === activeDay ? 'active' : ''} ${stateClass}" 
+      data-action="set-day" data-day="${d.key}" role="button" tabindex="0" aria-label="${d.label} ${hasEntries ? formatCurrency(t.net) : 'no data'}">
+      <div class="gd">${d.short}</div>
+      <div class="gv mono ${cls}">${valStr}</div>
+      ${recurringBadge}
+    </div>`;
+  }).join("");
+}
+
+function renderInsights() {
+  if (!insightsVisible) return;
+  const ins = computeInsights();
+  const grid = document.getElementById("insightsGrid");
+  const items = [];
+  if (ins.maxSpendDay) items.push({ label: "HIGHEST SPEND DAY", value: ins.maxSpendDay + " " + formatCurrency(ins.totals.cashOut > 0 ? (() => { const t = dayTotal(DAYS.find(d => d.label === ins.maxSpendDay)?.key || "mon"); return t.cashOut; })() : 0) });
+  if (ins.bestNetDay && ins.bestNet > 0) items.push({ label: "BEST DAY", value: ins.bestNetDay + " " + formatCurrency(ins.bestNet) });
+  if (ins.totals.cashOut > 0) items.push({ label: "TOTAL OUT", value: formatCurrency(ins.totals.cashOut) });
+  if (ins.totals.cashIn > 0) items.push({ label: "TOTAL IN", value: formatCurrency(ins.totals.cashIn) });
+  if (ins.totals.net !== 0) items.push({ label: "NET POSITION", value: (ins.totals.net < 0 ? "−" : "") + formatCurrency(Math.abs(ins.totals.net)), cls: ins.totals.net >= 0 ? "pos" : "neg" });
+
+  grid.innerHTML = items.map(item => `
+    <div class="insight-item">
+      <div class="insight-label mono">${item.label}</div>
+      <div class="insight-value mono ${item.cls || ''}">${item.value}</div>
+    </div>
+  `).join("");
+}
+
+function renderFooter() {
+  updateLastSaved();
+}
+
+function renderAll() {
+  renderBanner();
+  renderTabs();
+  renderDayPanel();
+  renderGlance();
+  renderInsights();
+  renderFooter();
+  checkStorage();
+}
+
+// ===== Utility =====
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ===== Phase 4: Event Delegation =====
+document.addEventListener("click", e => {
+  const target = e.target.closest("[data-action]");
+  if (!target) return;
+  const action = target.dataset.action;
+  switch (action) {
+    case "add-cash-in": dispatch("ADD_ENTRY", { type: "cashIn" }); break;
+    case "add-cash-out": dispatch("ADD_ENTRY", { type: "cashOut" }); break;
+    case "remove-entry": dispatch("REMOVE_ENTRY", { type: target.dataset.type, id: target.dataset.id }); break;
+    case "edit-entry": dispatch("START_EDIT", { type: target.dataset.type, id: target.dataset.id }); break;
+    case "set-day": dispatch("SET_DAY", { day: target.dataset.day }); break;
+    case "show-reset": dispatch("SHOW_RESET"); break;
+    case "hide-reset": dispatch("HIDE_RESET"); break;
+    case "reset-week": dispatch("RESET_WEEK"); break;
+    case "export-data": dispatch("EXPORT"); break;
+    case "import-data": dispatch("IMPORT"); break;
+    case "modal-save": dispatch("SAVE_EDIT"); break;
+    case "modal-cancel": dispatch("CANCEL_EDIT"); break;
+    case "toggle-insights": dispatch("TOGGLE_INSIGHTS"); break;
+  }
+});
+
+// Toast actions
+document.addEventListener("click", e => {
+  const closeBtn = e.target.closest("[data-toast-close]");
+  if (closeBtn) {
+    dismissToast(closeBtn.dataset.toastClose);
+    return;
+  }
+  const actionBtn = e.target.closest("[data-toast-action]");
+  if (actionBtn) {
+    const toast = document.getElementById(actionBtn.dataset.toastAction);
+    if (toast && toast._actionCallback) {
+      toast._actionCallback();
+      dismissToast(actionBtn.dataset.toastAction);
+    }
+  }
+});
+
+// Import file handler
+document.getElementById("importFile").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (file) dispatch("IMPORT_FILE", { file, merge: false });
+  e.target.value = "";
+});
+
+// Currency change
+document.getElementById("currencySelect").addEventListener("change", e => {
+  dispatch("CHANGE_CURRENCY", { currency: e.target.value });
+});
+
+// ===== Phase 1 + 4: Keyboard Shortcuts =====
+document.addEventListener("keydown", e => {
+  // Modal handling
+  const modalOpen = document.getElementById("modalOverlay").classList.contains("show");
+  if (modalOpen) {
+    if (e.key === "Escape") { dispatch("CANCEL_EDIT"); return; }
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { dispatch("SAVE_EDIT"); return; }
+    return;
+  }
+  // Confirm box
+  const confirmOpen = document.getElementById("confirmBox").classList.contains("show");
+  if (confirmOpen) {
+    if (e.key === "Escape") { dispatch("HIDE_RESET"); return; }
+    return;
+  }
+  // Global shortcuts (only when not in input)
+  const tag = e.target.tagName;
+  const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  if (!isInput) {
+    // Arrow keys navigate days
+    const dayIndex = DAYS.findIndex(d => d.key === activeDay);
+    if (e.key === "ArrowLeft" && dayIndex > 0) {
+      dispatch("SET_DAY", { day: DAYS[dayIndex - 1].key });
+      e.preventDefault();
+    }
+    if (e.key === "ArrowRight" && dayIndex < DAYS.length - 1) {
+      dispatch("SET_DAY", { day: DAYS[dayIndex + 1].key });
+      e.preventDefault();
+    }
+  }
+  // Ctrl/Cmd + Enter in inputs to submit
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (e.target.id === "modalLabel" || e.target.id === "modalAmount") {
+      dispatch("SAVE_EDIT");
+      return;
+    }
+  }
+});
+
+// Enter key on input fields
+document.getElementById("inLabel").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); document.getElementById("inAmount").focus(); } });
+document.getElementById("inAmount").addEventListener("keydown", e => { if (e.key === "Enter") dispatch("ADD_ENTRY", { type: "cashIn" }); });
+document.getElementById("outLabel").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); document.getElementById("outAmount").focus(); } });
+document.getElementById("outAmount").addEventListener("keydown", e => { if (e.key === "Enter") dispatch("ADD_ENTRY", { type: "cashOut" }); });
+
+// Modal inputs Enter handling
+document.getElementById("modalLabel").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); document.getElementById("modalAmount").focus(); } });
+document.getElementById("modalAmount").addEventListener("keydown", e => { if (e.key === "Enter") dispatch("SAVE_EDIT"); });
+
+// ===== Phase 5: Service Worker =====
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    self.addEventListener('install', e => {
+      e.waitUntil(caches.open('ledger-v1').then(cache =>
+        cache.addAll(['./'])
+      ));
+      self.skipWaiting();
+    });
+    self.addEventListener('fetch', e => {
+      e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+    });
+    self.addEventListener('activate', e => {
+      e.waitUntil(self.clients.claim());
+    });
+  `;
+  const swBlob = new Blob([swCode], { type: 'application/javascript' });
+  const swUrl = URL.createObjectURL(swBlob);
+  navigator.serviceWorker.register(swUrl).catch(() => {});
+}
+
+// ===== Phase 6: Populate currency select =====
+document.getElementById("currencySelect").value = state.currency;
+document.getElementById("bannerSymbol").textContent = getCurrencySymbol();
+
+// ===== Initial Render =====
+renderAll();
+showToast("Welcome back. Your data is safe on this device.", "info", 2500);
+</script>
+</body>
+</html>
