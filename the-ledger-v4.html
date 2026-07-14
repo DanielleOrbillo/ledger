@@ -1,0 +1,2999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5" />
+<meta name="theme-color" content="#161d1a" />
+<meta name="description" content="A beautiful offline-first weekly finance ledger. Track cash in and out, set savings goals, view week at a glance. All data stays on your device." />
+<title>The Ledger</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%92%3C/text%3E%3C/svg%3E" />
+<style>
+  /* ===== CSS Variables ===== */
+  :root {
+    --ink: #0f1412;
+    --panel: #1a2220;
+    --paper: #e8e2d1;
+    --paper-bright: #f7f3ea;
+    --sage: #8ab89a;
+    --sage-dim: #6a9478;
+    --clay: #d4787d;
+    --clay-dim: #b85a5f;
+    --gold: #d4a574;
+    --gold-dim: #b88d5e;
+    --line: rgba(232,226,209,0.08);
+    --focus-ring: 0 0 0 3px rgba(212,165,116,0.5);
+  }
+
+  /* ===== Reset & Base ===== */
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+    overflow-x: hidden;
+  }
+  .mono { font-family: "SF Mono", "Courier New", monospace; }
+  .serif { font-family: Georgia, "Times New Roman", serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 20px 18px 100px; }
+  @media (min-width: 620px) { .wrap { padding-bottom: 40px; } }
+
+  /* ===== Focus Visible ===== */
+  *:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  button, input, [tabindex] { transition: outline-offset 0.15s ease; }
+
+  /* ===== Screen Reader Only ===== */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+  #liveRegion { position: fixed; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+
+  /* ===== Loading Screen ===== */
+  .loading-screen {
+    position: fixed; inset: 0; background: var(--ink); z-index: 9999;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: opacity 0.4s ease, visibility 0.4s ease;
+  }
+  .loading-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  .loading-spinner {
+    width: 32px; height: 32px; border: 2px solid var(--line);
+    border-top-color: var(--gold); border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-title { font-size: 24px; color: var(--paper-bright); margin-top: 16px; letter-spacing: -0.02em; }
+  .loading-subtitle { font-size: 12px; color: rgba(232,226,209,0.4); margin-top: 4px; }
+
+  /* ===== Icon System ===== */
+  .icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; color: inherit; flex-shrink: 0;
+  }
+  .icon svg { width: 100%; height: 100%; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ===== App Header ===== */
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px; min-height: 40px;
+  }
+  .app-header h1 { font-size: 20px; margin: 0; color: var(--paper-bright); letter-spacing: -0.02em; }
+  .header-back {
+    background: none; border: none; color: var(--paper); cursor: pointer;
+    display: flex; align-items: center; gap: 6px; font-size: 14px; padding: 4px;
+  }
+  .header-back:hover { color: var(--gold); }
+
+  /* ===== View Router ===== */
+  .view { display: none; animation: viewFadeIn 0.25s ease; }
+  .view.active { display: block; }
+  @keyframes viewFadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .view { animation: none; } }
+
+  /* ===== Bottom Navigation ===== */
+  .bottom-nav {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: rgba(22,29,26,0.95); backdrop-filter: blur(10px);
+    border-top: 1px solid var(--line);
+    display: flex; justify-content: space-around;
+    padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+    z-index: 100;
+  }
+  .nav-btn {
+    background: none; border: none; color: rgba(232,226,209,0.4);
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    font-size: 10px; cursor: pointer; padding: 4px 12px;
+    transition: color 0.2s ease; font-family: inherit;
+    min-height: 44px; min-width: 64px;
+  }
+  .nav-btn:hover { color: rgba(232,226,209,0.7); }
+  .nav-btn.active { color: var(--gold); }
+  .nav-icon { width: 20px; height: 20px; }
+
+  /* ===== Top Navigation (Desktop) ===== */
+  .top-nav {
+    display: none; position: sticky; top: 0; z-index: 50;
+    background: var(--ink); padding: 8px 0; margin-bottom: 20px;
+  }
+  .top-nav-inner { display: flex; gap: 8px; justify-content: center; }
+  .top-nav-btn {
+    background: none; border: 1px solid var(--line); border-radius: 8px;
+    color: rgba(232,226,209,0.5); padding: 8px 16px; font-size: 13px;
+    cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 6px;
+    transition: all 0.2s ease;
+  }
+  .top-nav-btn:hover { border-color: var(--gold); color: var(--gold); }
+  .top-nav-btn.active { background: var(--panel); border-color: var(--gold); color: var(--gold); }
+
+  @media (min-width: 620px) {
+    .bottom-nav { display: none; }
+    .top-nav { display: block; }
+    .wrap { padding-bottom: 28px; }
+  }
+  @media (max-width: 619px) {
+    .top-nav { display: none; }
+    .wrap { padding-bottom: 90px; }
+  }
+
+  /* ===== Home Dashboard ===== */
+  .home-hero {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 28px 24px; margin-bottom: 20px; text-align: center; position: relative; overflow: hidden;
+  }
+  .home-hero .greeting {
+    font-size: 11px; letter-spacing: 0.2em; color: var(--sage); text-transform: uppercase;
+  }
+  .home-hero .date-line {
+    font-size: 13px; color: rgba(232,226,209,0.5); margin-top: 4px;
+  }
+  .home-hero .hero-balance {
+    font-size: 48px; font-family: monospace; margin-top: 12px; letter-spacing: -0.03em; line-height: 1.1;
+  }
+  .home-hero .hero-label {
+    font-size: 12px; color: rgba(232,226,209,0.4); margin-top: 6px; letter-spacing: 0.05em;
+  }
+  .hero-trend {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px; margin-top: 8px;
+    padding: 4px 10px; border-radius: 20px; background: rgba(232,226,209,0.05);
+  }
+  .hero-bigsymbol { position: absolute; right: -10px; bottom: -24px; font-size: 100px; font-family: Georgia, serif; color: rgba(232,226,209,0.03); user-select: none; }
+
+  .quick-actions {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;
+  }
+  .qa-btn {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 12px; color: var(--paper); font-family: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    transition: all 0.2s ease; font-size: 12px; letter-spacing: 0.05em;
+    min-height: 80px;
+  }
+  .qa-btn:hover { border-color: var(--gold); background: rgba(212,165,116,0.05); transform: translateY(-1px); }
+  .qa-btn:active { transform: scale(0.98); }
+  .qa-btn .icon { width: 24px; height: 24px; }
+  .qa-btn.in { color: var(--sage); }
+  .qa-btn.in:hover { border-color: var(--sage); background: rgba(124,152,133,0.08); }
+  .qa-btn.out { color: var(--clay); }
+  .qa-btn.out:hover { border-color: var(--clay); background: rgba(193,102,107,0.08); }
+
+  .section-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px; margin-bottom: 16px;
+  }
+  .section-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+  }
+  .section-title {
+    font-size: 10px; letter-spacing: 0.2em; color: var(--gold); text-transform: uppercase; margin: 0;
+  }
+  .section-link {
+    background: none; border: none; color: rgba(232,226,209,0.4); font-size: 11px; cursor: pointer;
+    font-family: inherit; display: flex; align-items: center; gap: 4px;
+  }
+  .section-link:hover { color: var(--gold); }
+
+  .recent-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .recent-row:last-child { border-bottom: none; }
+  .recent-row .r-label { color: rgba(232,226,209,0.85); display: flex; align-items: center; gap: 6px; }
+  .recent-row .r-day { font-size: 10px; color: rgba(232,226,209,0.3); margin-left: 6px; }
+  .recent-row .r-amt { font-family: monospace; font-size: 13px; }
+
+  .goals-preview { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+  .goals-preview::-webkit-scrollbar { display: none; }
+  .goal-card-mini {
+    flex: 0 0 auto; width: 160px; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; cursor: pointer; transition: border-color 0.2s ease;
+  }
+  .goal-card-mini:hover { border-color: var(--gold); }
+  .goal-card-mini .gc-name { font-size: 13px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .goal-card-mini .gc-amt { font-size: 11px; color: rgba(232,226,209,0.4); margin-bottom: 8px; }
+  .goal-card-mini .gc-bar { height: 4px; background: rgba(232,226,209,0.08); border-radius: 2px; overflow: hidden; }
+  .goal-card-mini .gc-fill { height: 100%; background: var(--sage); border-radius: 2px; transition: width 0.4s ease; }
+  .goal-card-mini .gc-pct { font-size: 10px; color: var(--sage); margin-top: 6px; text-align: right; font-family: monospace; }
+
+  .week-preview-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+  }
+  .wp-day {
+    border-radius: 6px; border: 1px solid var(--line); background: rgba(28,35,33,0.5);
+    text-align: center; padding: 8px 2px; cursor: pointer; transition: all 0.2s ease;
+  }
+  .wp-day:hover { border-color: rgba(212,165,116,0.3); }
+  .wp-day .wp-d { font-size: 9px; font-family: monospace; color: rgba(232,226,209,0.4); margin-bottom: 3px; }
+  .wp-day .wp-v { font-size: 10px; font-family: monospace; }
+  .wp-day.pos { border-color: rgba(124,152,133,0.25); }
+  .wp-day.pos .wp-v { color: var(--sage); }
+  .wp-day.neg { border-color: rgba(193,102,107,0.25); }
+  .wp-day.neg .wp-v { color: var(--clay); }
+  .wp-day.zero .wp-v { color: rgba(232,226,209,0.5); }
+  .wp-day.empty .wp-v { color: rgba(232,226,209,0.15); }
+
+  /* ===== Goals View ===== */
+  .goals-empty {
+    text-align: center; padding: 40px 20px; color: rgba(232,226,209,0.3);
+  }
+  .goals-empty .icon { width: 40px; height: 40px; margin-bottom: 12px; }
+  .goal-item {
+    background: var(--ink); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px; margin-bottom: 10px;
+  }
+  .goal-item .gi-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .goal-item .gi-name { font-size: 15px; color: var(--paper-bright); }
+  .goal-item .gi-target { font-size: 12px; color: rgba(232,226,209,0.4); margin-top: 2px; }
+  .goal-item .gi-actions { display: flex; gap: 6px; }
+  .goal-bar { height: 8px; background: rgba(232,226,209,0.08); border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+  .goal-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease, background 0.3s ease; }
+  .goal-bar-fill.complete { background: var(--gold); }
+  .goal-stats { display: flex; justify-content: space-between; font-size: 11px; color: rgba(232,226,209,0.4); font-family: monospace; }
+  .goal-deposit-row { display: flex; gap: 6px; margin-top: 10px; }
+  .goal-deposit-row input {
+    flex: 1; background: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--paper); padding: 8px 10px; font-size: 13px; font-family: monospace;
+  }
+  .goal-deposit-row input:focus { border-color: rgba(212,165,116,0.4); }
+  .goal-form { display: none; margin-bottom: 20px; }
+  .goal-form.show { display: block; }
+
+  /* ===== Settings View ===== */
+  .settings-group { margin-bottom: 24px; }
+  .settings-label { font-size: 10px; letter-spacing: 0.2em; color: var(--gold); text-transform: uppercase; margin-bottom: 10px; }
+  .settings-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px;
+  }
+  .settings-row:last-child { border-bottom: none; }
+  .settings-row .sr-label { color: rgba(232,226,209,0.85); display: flex; align-items: center; gap: 8px; }
+  .settings-row .sr-desc { font-size: 11px; color: rgba(232,226,209,0.35); margin-top: 2px; }
+  .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .export-btn {
+    background: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; color: var(--paper); font-family: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    font-size: 11px; transition: all 0.2s ease;
+  }
+  .export-btn:hover { border-color: var(--gold); background: rgba(212,165,116,0.05); }
+  .export-btn .icon { width: 18px; height: 18px; }
+
+  /* ===== Toast Notifications ===== */
+  .toast-container {
+    position: fixed; top: 16px; right: 16px; z-index: 1000;
+    display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+    max-width: 360px;
+  }
+  .toast {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; font-size: 13px; color: var(--paper);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    display: flex; align-items: center; gap: 10px; min-width: 260px; max-width: 340px;
+    pointer-events: all;
+    animation: toastIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .toast.toast-out { animation: toastOut 0.25s ease forwards; }
+  .toast.success { border-left: 3px solid var(--sage); }
+  .toast.error { border-left: 3px solid var(--clay); }
+  .toast.info { border-left: 3px solid var(--gold); }
+  .toast .toast-msg { flex: 1; }
+  .toast .toast-action {
+    background: none; border: none; color: var(--gold); font-size: 11px;
+    cursor: pointer; font-weight: 600; letter-spacing: 0.05em; padding: 2px 6px;
+  }
+  .toast .toast-close {
+    background: none; border: none; color: rgba(232,226,209,0.4); font-size: 14px;
+    cursor: pointer; padding: 2px; min-width: 28px; min-height: 28px;
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateX(40px) scale(0.95); }
+    to { opacity: 1; transform: translateX(0) scale(1); }
+  }
+  @keyframes toastOut {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(40px); }
+  }
+
+  /* ===== Confirmation Box ===== */
+  .confirm-box {
+    display: none; margin-bottom: 20px; border: 1px solid rgba(193,102,107,0.4);
+    background: rgba(193,102,107,0.1); border-radius: 10px; padding: 14px 16px;
+    align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .confirm-box.show { display: flex; }
+  .confirm-box p { margin: 0; font-size: 14px; flex: 1; min-width: 180px; }
+  .confirm-box .btns { display: flex; gap: 8px; }
+
+  /* ===== Import Merge Dialog ===== */
+  .merge-dialog {
+    display: none; margin-bottom: 20px; border: 1px solid var(--gold);
+    background: rgba(212,165,116,0.08); border-radius: 10px; padding: 14px 16px;
+    align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .merge-dialog.show { display: flex; }
+  .merge-dialog p { margin: 0; font-size: 14px; flex: 1; min-width: 180px; }
+
+  /* ===== Storage Warning ===== */
+  .storage-warning {
+    display: none; margin-bottom: 16px; border: 1px solid rgba(212,165,116,0.4);
+    background: rgba(212,165,116,0.1); border-radius: 10px; padding: 10px 14px;
+    font-size: 12px; color: var(--gold); align-items: center; gap: 8px;
+  }
+  .storage-warning.show { display: flex; }
+
+  /* ===== Offline Indicator ===== */
+  .offline-bar {
+    display: none; margin-bottom: 16px; border: 1px solid rgba(124,152,133,0.3);
+    background: rgba(124,152,133,0.1); border-radius: 10px; padding: 8px 14px;
+    font-size: 12px; color: var(--sage); align-items: center; justify-content: center; gap: 6px;
+  }
+  .offline-bar.show { display: flex; }
+
+  /* ===== Ledger: Banner (moved to Home, but keep styles for reference) ===== */
+  .banner { position: relative; overflow: hidden; border-radius: 14px; border: 1px solid var(--line);
+    background: var(--panel); padding: 26px 24px; margin-bottom: 26px; transition: border-color 0.3s ease; }
+  .banner:hover { border-color: rgba(212,165,116,0.15); }
+  .banner .eyebrow { display: flex; align-items: center; gap: 6px; color: rgba(232,226,209,0.4); font-size: 10px; letter-spacing: 0.25em; }
+  .banner .total { font-size: 42px; letter-spacing: -0.02em; margin-top: 6px; transition: color 0.3s ease; }
+  .pos { color: var(--sage); } .neg { color: var(--clay); }
+  .banner .subrow { display: flex; gap: 22px; margin-top: 14px; font-size: 12px; }
+  .banner .bigsymbol { position: absolute; right: -10px; bottom: -20px; font-size: 120px;
+    font-family: Georgia, serif; color: rgba(232,226,209,0.03); user-select: none; }
+
+  /* ===== Budget Bar ===== */
+  .budget-bar-container { margin-top: 14px; display: none; }
+  .budget-bar-container.show { display: block; }
+  .budget-bar-label { display: flex; justify-content: space-between; font-size: 11px; color: rgba(232,226,209,0.4); margin-bottom: 4px; }
+  .budget-bar-track { height: 6px; background: rgba(232,226,209,0.08); border-radius: 3px; overflow: hidden; }
+  .budget-bar-fill { height: 100%; background: var(--sage); border-radius: 3px; transition: width 0.5s ease, background 0.3s ease; min-width: 0; }
+  .budget-bar-fill.warning { background: var(--gold); }
+  .budget-bar-fill.danger { background: var(--clay); }
+  .budget-input-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .budget-input-row input { width: 100px; font-family: monospace; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--paper); padding: 6px 8px; font-size: 12px; }
+  .budget-toggle { background: none; border: 1px solid rgba(232,226,209,0.15); color: rgba(232,226,209,0.4);
+    border-radius: 6px; padding: 4px 10px; font-size: 10px; cursor: pointer; letter-spacing: 0.05em; }
+  .budget-toggle:hover { color: var(--gold); border-color: var(--gold); }
+
+  /* ===== Insights Bar ===== */
+  .insights-bar { display: none; margin-bottom: 20px; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 14px 16px; }
+  .insights-bar.show { display: block; }
+  .insights-title { font-size: 10px; letter-spacing: 0.2em; color: var(--gold); margin-bottom: 8px; }
+  .insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .insight-item { font-size: 12px; }
+  .insight-label { color: rgba(232,226,209,0.45); margin-bottom: 2px; }
+  .insight-value { font-size: 14px; font-weight: 600; }
+
+  /* ===== Search / Filter ===== */
+  .search-row { display: none; margin-bottom: 16px; gap: 8px; align-items: center; }
+  .search-row.show { display: flex; }
+  .search-row input { flex: 1; font-family: inherit; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--paper); padding: 8px 12px; font-size: 13px; }
+  .search-row input::placeholder { color: rgba(232,226,209,0.25); }
+  .search-row input:focus { border-color: rgba(212,165,116,0.4); }
+  .search-toggle { background: none; border: 1px solid rgba(232,226,209,0.15); color: rgba(232,226,209,0.4);
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .search-toggle:hover, .search-toggle.active { color: var(--gold); border-color: var(--gold); }
+
+  /* ===== Tabs ===== */
+  .tabs { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; margin-bottom: 1px;
+    position: sticky; top: 0; z-index: 10; background: var(--ink); padding-top: 8px; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: 1; min-width: 58px; text-align: center; padding: 10px 4px; border-radius: 8px 8px 0 0;
+    border: none; border-bottom: 2px solid transparent; background: transparent; cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease; color: inherit; font-family: inherit; font-size: inherit; }
+  .tab:hover { background: rgba(28,35,33,0.5); }
+  .tab[aria-selected="true"] { background: var(--panel); border-bottom-color: var(--gold); }
+  .tab:focus-visible { outline-offset: -2px; }
+  .tab .d { font-size: 11px; letter-spacing: 0.03em; color: rgba(232,226,209,0.45); font-family: monospace; transition: color 0.2s ease; pointer-events: none; }
+  .tab[aria-selected="true"] .d { color: var(--paper-bright); }
+  .tab .dot { width: 4px; height: 4px; border-radius: 50%; margin: 6px auto 0; background: transparent; transition: background 0.2s ease; pointer-events: none; }
+  .tab .dot.has { background: var(--gold); }
+  .tab .date-hint { font-size: 9px; color: rgba(232,226,209,0.25); margin-top: 2px; font-family: monospace; pointer-events: none; }
+
+  /* ===== Panel ===== */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 0 10px 10px 10px; padding: 22px; margin-bottom: 26px; }
+  .panel.animate { animation: panelFade 0.25s ease; }
+  @keyframes panelFade {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .panel-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+  .panel-head h2 { font-size: 21px; margin: 0; color: var(--paper-bright); font-weight: normal; }
+  .panel-date { font-size: 11px; color: rgba(232,226,209,0.35); font-family: monospace; }
+  .cols { display: grid; grid-template-columns: 1fr; gap: 20px; }
+  @media (min-width: 620px) { .cols { grid-template-columns: 1fr 1fr; } }
+  .col-label { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.15em; margin-bottom: 8px; }
+  .col-label.in { color: var(--sage); } .col-label.out { color: var(--clay); }
+
+  /* ===== Sort Controls ===== */
+  .sort-row { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .sort-btn { background: none; border: 1px solid rgba(232,226,209,0.1); color: rgba(232,226,209,0.35);
+    border-radius: 4px; padding: 2px 8px; font-size: 10px; cursor: pointer; letter-spacing: 0.05em; }
+  .sort-btn:hover { color: var(--gold); border-color: var(--gold); }
+  .sort-btn.active { color: var(--gold); border-color: var(--gold); background: rgba(212,165,116,0.1); }
+
+  /* ===== Entry List ===== */
+  .list { border-radius: 8px; background: rgba(22,29,26,0.6);
+    background-image: repeating-linear-gradient(to bottom, transparent, transparent 33px, rgba(232,226,209,0.05) 33px, rgba(232,226,209,0.05) 34px);
+    min-height: 44px; margin-bottom: 10px; max-height: 220px; overflow-y: auto; scroll-behavior: smooth; }
+  .empty { font-size: 13px; color: rgba(232,226,209,0.35); padding: 16px 12px; text-align: center; }
+  .empty-context { font-size: 11px; color: rgba(232,226,209,0.2); margin-top: 4px; }
+  .cat-badge { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
+  .cat-label { font-size: 10px; color: rgba(232,226,209,0.4); margin-left: 4px; }
+  .entry-time { font-size: 10px; color: rgba(232,226,209,0.25); margin-left: 6px; font-family: monospace; }
+  .bulk-bar { display: none; align-items: center; gap: 8px; margin-bottom: 10px; padding: 8px 10px;
+    background: rgba(212,165,116,0.08); border-radius: 6px; font-size: 12px; }
+  .bulk-bar.show { display: flex; }
+  .bulk-checkbox { width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 0 10px;
+    min-height: 34px; border-radius: 4px; margin: 0 2px; transition: background 0.15s ease; }
+  @media (prefers-reduced-motion: no-preference) { .row { animation: rowIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); } }
+  @media (prefers-reduced-motion: reduce) { .row { animation: none; } .panel.animate { animation: none; } }
+  .row:hover { background: rgba(232,226,209,0.04); }
+  @keyframes rowIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+  .row .label { font-size: 14px; color: rgba(232,226,209,0.85); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; padding-right: 8px; cursor: pointer; display: flex; align-items: center; }
+  .row .label:hover { color: var(--paper-bright); }
+  .row .right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .row .amt { font-size: 13px; }
+  .row-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 0.15s ease; }
+  .row:hover .row-actions { opacity: 1; }
+  @media (hover: none) { .row-actions { opacity: 1; } }
+  .row-btn { background: none; border: none; color: rgba(232,226,209,0.3); cursor: pointer; padding: 6px;
+    font-size: 12px; line-height: 1; border-radius: 4px; transition: color 0.15s ease, background 0.15s ease;
+    min-width: 28px; min-height: 28px; display: flex; align-items: center; justify-content: center; }
+  .row-btn:hover { color: var(--paper-bright); background: rgba(232,226,209,0.08); }
+  .row-btn.edit:hover { color: var(--gold); }
+  .row-btn.del:hover { color: var(--clay); background: rgba(193,102,107,0.15); }
+  .row-btn:active { transform: scale(0.92); }
+
+  .row-editing { display: flex; align-items: center; gap: 4px; padding: 2px 6px; height: 34px; }
+  .row-editing input { font-family: inherit; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 4px; color: var(--paper); padding: 4px 6px; font-size: 13px; }
+  .row-editing input.txt { flex: 1; min-width: 0; }
+  .row-editing input.num { width: 70px; font-family: monospace; }
+  .row-editing .row-btn { opacity: 1; }
+
+  /* ===== Inputs ===== */
+  .input-row { display: flex; gap: 6px; }
+  .input-row input { font-family: inherit; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--paper); padding: 9px 10px; font-size: 14px; }
+  .input-row input::placeholder { color: rgba(232,226,209,0.25); }
+  .input-row input:focus { border-color: rgba(212,165,116,0.4); }
+  .input-row input[aria-invalid="true"] { border-color: var(--clay); }
+  .input-row .txt { flex: 1; min-width: 0; }
+  .input-row .num { width: 70px; font-family: monospace; }
+  .add-btn { flex-shrink: 0; width: 36px; height: 36px; border-radius: 6px; border: none;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; }
+  .add-btn.in { background: rgba(124,152,133,0.2); color: var(--sage); }
+  .add-btn.in:hover { background: rgba(124,152,133,0.35); }
+  .add-btn.in:active { transform: scale(0.95); }
+  .add-btn.out { background: rgba(193,102,107,0.2); color: var(--clay); }
+  .add-btn.out:hover { background: rgba(193,102,107,0.35); }
+  .add-btn.out:active { transform: scale(0.95); }
+
+  /* ===== Category Selector ===== */
+  .category-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .category-row label { font-size: 11px; color: rgba(232,226,209,0.4); }
+  .category-select { background: var(--ink); border: 1px solid var(--line); border-radius: 4px;
+    color: var(--paper); padding: 3px 6px; font-size: 11px; font-family: inherit; cursor: pointer; }
+
+  /* ===== Recurring Toggle ===== */
+  .recurring-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .recurring-row label { font-size: 11px; color: rgba(232,226,209,0.4); cursor: pointer;
+    display: flex; align-items: center; gap: 4px; user-select: none; }
+  .recurring-row input[type="checkbox"] { accent-color: var(--gold); width: 14px; height: 14px; cursor: pointer; }
+
+  /* ===== Currency Selector ===== */
+  .currency-select { background: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--paper); padding: 4px 8px; font-size: 12px; font-family: monospace; cursor: pointer; }
+
+  /* ===== Modal ===== */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 900;
+    display: none; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(4px); }
+  .modal-overlay.show { display: flex; animation: modalIn 0.2s ease; }
+  @keyframes modalIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 24px; max-width: 400px; width: 100%; animation: modalSlide 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+  @keyframes modalSlide { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  .modal h3 { margin: 0 0 16px; font-size: 18px; color: var(--paper-bright); font-weight: normal; }
+  .modal-body { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+  .modal-body label { font-size: 11px; letter-spacing: 0.1em; color: rgba(232,226,209,0.5); }
+  .modal-body input, .modal-body select { font-family: inherit; background: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--paper); padding: 10px 12px; font-size: 14px; width: 100%; }
+  .modal-body input:focus, .modal-body select:focus { border-color: rgba(212,165,116,0.4); }
+  .modal-body input[aria-invalid="true"] { border-color: var(--clay); }
+  .modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* ===== Recurring Management Modal ===== */
+  .recurring-list { max-height: 200px; overflow-y: auto; }
+  .recurring-item { display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .recurring-item:last-child { border-bottom: none; }
+  .recurring-empty { font-size: 12px; color: rgba(232,226,209,0.3); font-style: italic; padding: 12px 0; }
+
+  /* ===== Buttons ===== */
+  .btn-ghost { background: none; border: 1px solid rgba(232,226,209,0.2); color: var(--paper);
+    border-radius: 6px; padding: 8px 14px; font-size: 12px; cursor: pointer; font-family: inherit; min-height: 36px; }
+  .btn-ghost:hover { border-color: var(--gold); color: var(--gold); }
+  .btn-ghost:active { transform: scale(0.98); }
+  .btn-clay { background: var(--clay); border: none; color: var(--ink); border-radius: 6px;
+    padding: 8px 14px; font-size: 12px; cursor: pointer; font-weight: 600; min-height: 36px; }
+  .btn-clay:hover { background: var(--clay-dim); }
+  .btn-clay:active { transform: scale(0.98); }
+  .btn-sage { background: var(--sage); border: none; color: var(--ink); border-radius: 6px;
+    padding: 8px 14px; font-size: 12px; cursor: pointer; font-weight: 600; min-height: 36px; }
+  .btn-sage:hover { background: var(--sage-dim); }
+  .btn-sage:active { transform: scale(0.98); }
+  .btn-gold { background: var(--gold); border: none; color: var(--ink); border-radius: 6px;
+    padding: 8px 14px; font-size: 12px; cursor: pointer; font-weight: 600; min-height: 36px; }
+  .btn-gold:hover { background: var(--gold-dim); }
+  .btn-gold:active { transform: scale(0.98); }
+
+  /* ===== Footer ===== */
+  .footer { text-align: center; font-size: 11px; letter-spacing: 0.03em;
+    color: rgba(232,226,209,0.45); font-family: monospace; line-height: 1.8; }
+  .footer .last-saved { color: rgba(232,226,209,0.3); }
+  .footer .install-btn { background: none; border: 1px solid rgba(124,152,133,0.3); color: var(--sage);
+    border-radius: 6px; padding: 4px 12px; font-size: 11px; cursor: pointer; font-family: monospace;
+    margin-bottom: 8px; display: none; }
+  .footer .install-btn.show { display: inline-block; }
+  .footer .install-btn:hover { background: rgba(124,152,133,0.15); }
+
+  /* ===== Scrollbar ===== */
+  .list::-webkit-scrollbar { width: 6px; }
+  .list::-webkit-scrollbar-track { background: transparent; }
+  .list::-webkit-scrollbar-thumb { background: rgba(232,226,209,0.1); border-radius: 3px; }
+  .list::-webkit-scrollbar-thumb:hover { background: rgba(232,226,209,0.2); }
+
+  /* ===== Print Styles ===== */
+  @media print {
+    body { background: white; color: black; }
+    .wrap { max-width: 100%; padding: 0; }
+    .header-actions, .input-row, .recurring-row, .category-row, .add-btn, .row-actions, .row-btn,
+    .confirm-box, .storage-warning, .offline-bar, .toast-container, .modal-overlay, .tabs, .glance-toggle,
+    .search-row, .sort-row, .bulk-bar, .budget-toggle, .today-btn, .search-toggle, .footer .install-btn,
+    .bottom-nav, .top-nav, .app-header, .loading-screen { display: none !important; }
+    .banner, .panel, .insights-bar, .section-card { border: 1px solid #ccc; background: white; page-break-inside: avoid; }
+    .glance, .goals-preview, .week-preview-grid { display: none; }
+    .row { border-bottom: 1px solid #eee; }
+    .footer { color: #666; }
+    h1, h2, h3 { color: black; }
+    .pos { color: #2d6a4f; } .neg { color: #9b2335; }
+  }
+
+  /* ===== Reduced Motion ===== */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+
+  /* ===== Micro-interactions ===== */
+  button, .add-btn { transition: transform 0.1s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
+
+  /* ===== Mobile sticky tabs ===== */
+  @media (max-width: 619px) {
+    .tabs { position: sticky; top: 0; background: var(--ink); z-index: 50; padding-top: 6px; margin: 0 -18px; padding-left: 18px; padding-right: 18px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Screen reader live region -->
+<div id="liveRegion" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+<!-- Loading Screen -->
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-spinner"></div>
+  <div class="loading-title serif">The Ledger</div>
+  <div class="loading-subtitle mono">Loading your data...</div>
+</div>
+
+<!-- Modal Overlay (Edit Entry) -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h3 class="serif" id="modalTitle">Edit Entry</h3>
+    <div class="modal-body">
+      <div>
+        <label class="mono" for="modalLabel">LABEL</label>
+        <input type="text" id="modalLabel" />
+      </div>
+      <div>
+        <label class="mono" for="modalAmount">AMOUNT</label>
+        <input type="text" id="modalAmount" inputmode="decimal" />
+      </div>
+      <div>
+        <label class="mono" for="modalCategory">CATEGORY</label>
+        <select id="modalCategory"></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost mono" data-action="modal-cancel">CANCEL</button>
+      <button class="btn-clay mono" data-action="modal-save">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts Modal -->
+<div class="modal-overlay" id="shortcutsOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+    <h3 class="serif" id="shortcutsTitle">Keyboard Shortcuts</h3>
+    <div class="shortcut-grid">
+      <span class="shortcut-key">← →</span><span class="shortcut-desc">Navigate between days</span>
+      <span class="shortcut-key">Tab</span><span class="shortcut-desc">Move between fields</span>
+      <span class="shortcut-key">Enter</span><span class="shortcut-desc">Submit form / activate button</span>
+      <span class="shortcut-key">Shift+Enter</span><span class="shortcut-desc">Submit and add another</span>
+      <span class="shortcut-key">Ctrl+Enter</span><span class="shortcut-desc">Save modal / submit</span>
+      <span class="shortcut-key">Escape</span><span class="shortcut-desc">Close modal / cancel</span>
+      <span class="shortcut-key">?</span><span class="shortcut-desc">Show this help</span>
+      <span class="shortcut-key">Ctrl+F</span><span class="shortcut-desc">Toggle search</span>
+    </div>
+    <div class="modal-footer" style="margin-top: 16px;">
+      <button class="btn-ghost mono" data-action="close-shortcuts">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Merge Dialog -->
+<div class="merge-dialog" id="mergeDialog">
+  <p>Import mode: How would you like to handle the imported data?</p>
+  <div class="btns">
+    <button class="btn-ghost mono" data-action="import-merge">MERGE</button>
+    <button class="btn-clay mono" data-action="import-replace">REPLACE</button>
+    <button class="btn-ghost mono" data-action="import-cancel">CANCEL</button>
+  </div>
+</div>
+
+<!-- Recurring Management Modal -->
+<div class="modal-overlay" id="recurringOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="recurringTitle">
+    <h3 class="serif" id="recurringTitle">Recurring Entries</h3>
+    <div class="modal-body">
+      <div class="insights-title mono">INCOME</div>
+      <div class="recurring-list" id="recurringInList"></div>
+      <div class="insights-title mono" style="margin-top: 12px;">EXPENSES</div>
+      <div class="recurring-list" id="recurringOutList"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost mono" data-action="close-recurring">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Goal Deposit Modal -->
+<div class="modal-overlay" id="goalDepositOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="goalDepositTitle">
+    <h3 class="serif" id="goalDepositTitle">Deposit to Goal</h3>
+    <div class="modal-body">
+      <div>
+        <label class="mono" for="goalDepositAmount">AMOUNT</label>
+        <input type="text" id="goalDepositAmount" inputmode="decimal" placeholder="0.00" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost mono" data-action="cancel-goal-deposit">CANCEL</button>
+      <button class="btn-sage mono" data-action="confirm-goal-deposit">DEPOSIT</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <!-- Top Navigation (Desktop) -->
+  <nav class="top-nav" id="topNav" aria-label="Main navigation">
+    <div class="top-nav-inner">
+      <button class="top-nav-btn active" data-action="navigate" data-view="home" data-nav="home">
+        <span class="icon nav-icon" data-icon="home"></span> Home
+      </button>
+      <button class="top-nav-btn" data-action="navigate" data-view="ledger" data-nav="ledger">
+        <span class="icon nav-icon" data-icon="book"></span> Ledger
+      </button>
+      <button class="top-nav-btn" data-action="navigate" data-view="goals" data-nav="goals">
+        <span class="icon nav-icon" data-icon="target"></span> Goals
+      </button>
+      <button class="top-nav-btn" data-action="navigate" data-view="settings" data-nav="settings">
+        <span class="icon nav-icon" data-icon="sliders"></span> Settings
+      </button>
+    </div>
+  </nav>
+
+  <!-- Offline Indicator -->
+  <div class="offline-bar mono" id="offlineBar" role="status">
+    <span class="icon" data-icon="wifi-off"></span>
+    <span>You're offline. Changes will sync when you reconnect.</span>
+  </div>
+
+  <!-- Storage Warning -->
+  <div class="storage-warning mono" id="storageWarning" role="alert">
+    <span class="icon" data-icon="alert-triangle"></span>
+    <span id="storageWarningText">Storage is getting full.</span>
+  </div>
+
+  <!-- Reset Confirmation -->
+  <div class="confirm-box" id="confirmBox">
+    <p>Start a new week? This clears all entries for every day.</p>
+    <div class="btns">
+      <button class="btn-ghost mono" data-action="hide-reset">CANCEL</button>
+      <button class="btn-clay mono" data-action="reset-week">CLEAR IT</button>
+    </div>
+  </div>
+
+  <!-- ==================== HOME VIEW ==================== -->
+  <div class="view active" id="view-home" data-view="home">
+    <div class="home-hero">
+      <div class="greeting mono" id="homeGreeting">GOOD MORNING</div>
+      <div class="date-line" id="homeDate">Monday, July 14</div>
+      <div class="hero-balance mono" id="homeBalance">P0.00</div>
+      <div class="hero-label mono">WHAT'S LEFT THIS WEEK</div>
+      <div class="hero-trend mono" id="homeTrend"></div>
+      <div class="hero-bigsymbol" id="homeSymbol">P</div>
+    </div>
+
+    <div class="quick-actions">
+      <button class="qa-btn in" data-action="quick-income">
+        <span class="icon" data-icon="arrow-down-left"></span>
+        <span>+ INCOME</span>
+      </button>
+      <button class="qa-btn out" data-action="quick-expense">
+        <span class="icon" data-icon="arrow-up-right"></span>
+        <span>+ EXPENSE</span>
+      </button>
+      <button class="qa-btn" data-action="navigate" data-view="ledger">
+        <span class="icon" data-icon="book"></span>
+        <span>LEDGER</span>
+      </button>
+      <button class="qa-btn" data-action="navigate" data-view="goals">
+        <span class="icon" data-icon="target"></span>
+        <span>GOALS</span>
+      </button>
+    </div>
+
+    <!-- Savings Goals Preview -->
+    <div class="section-card" id="goalsPreviewCard">
+      <div class="section-header">
+        <h3 class="section-title mono">SAVINGS GOALS</h3>
+        <button class="section-link" data-action="navigate" data-view="goals">
+          VIEW ALL <span class="icon" style="width:14px;height:14px;" data-icon="chevron-right"></span>
+        </button>
+      </div>
+      <div class="goals-preview" id="goalsPreview"></div>
+    </div>
+
+    <!-- Recent Transactions -->
+    <div class="section-card">
+      <div class="section-header">
+        <h3 class="section-title mono">RECENT ACTIVITY</h3>
+        <button class="section-link" data-action="navigate" data-view="ledger">
+          SEE ALL <span class="icon" style="width:14px;height:14px;" data-icon="chevron-right"></span>
+        </button>
+      </div>
+      <div id="recentActivity"></div>
+    </div>
+
+    <!-- Week Preview -->
+    <div class="section-card">
+      <div class="section-header">
+        <h3 class="section-title mono">THIS WEEK</h3>
+      </div>
+      <div class="week-preview-grid" id="weekPreview"></div>
+    </div>
+
+    <!-- Budget Preview -->
+    <div class="section-card" id="homeBudgetCard" style="display:none;">
+      <div class="section-header">
+        <h3 class="section-title mono">WEEKLY BUDGET</h3>
+      </div>
+      <div class="budget-bar-label">
+        <span class="mono" id="homeBudgetText">P0 / P0</span>
+      </div>
+      <div class="budget-bar-track">
+        <div class="budget-bar-fill" id="homeBudgetFill" style="width: 0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== LEDGER VIEW ==================== -->
+  <div class="view" id="view-ledger" data-view="ledger">
+    <div class="app-header">
+      <button class="header-back" data-action="navigate" data-view="home">
+        <span class="icon" data-icon="arrow-left"></span> Back
+      </button>
+      <h1 class="serif">Ledger</h1>
+      <div style="width:60px;"></div>
+    </div>
+
+    <!-- Banner (kept in ledger for context, but simplified) -->
+    <div class="banner">
+      <div class="eyebrow mono"><span class="icon" style="width:14px;height:14px;" data-icon="dollar-sign"></span> WHAT'S LEFT THIS WEEK</div>
+      <div class="total mono" id="weekTotal">P0.00</div>
+      <div class="subrow mono">
+        <span class="pos"><span class="icon" style="width:12px;height:12px;" data-icon="arrow-up"></span> IN <span id="weekIn">P0.00</span></span>
+        <span class="neg"><span class="icon" style="width:12px;height:12px;" data-icon="arrow-down"></span> OUT <span id="weekOut">P0.00</span></span>
+      </div>
+      <div class="budget-bar-container" id="budgetContainer">
+        <div class="budget-bar-label">
+          <span class="mono">BUDGET</span>
+          <span class="mono" id="budgetText">P0 / P0</span>
+        </div>
+        <div class="budget-bar-track">
+          <div class="budget-bar-fill" id="budgetFill" style="width: 0%"></div>
+        </div>
+      </div>
+      <div class="budget-input-row" id="budgetInputRow" style="display: none;">
+        <input type="text" id="budgetInput" placeholder="Weekly budget" inputmode="decimal" />
+        <button class="btn-sage mono" data-action="set-budget">SET</button>
+        <button class="btn-ghost mono" data-action="hide-budget-input">CANCEL</button>
+      </div>
+      <button class="budget-toggle mono" id="budgetToggle" data-action="show-budget-input">SET BUDGET</button>
+      <div class="bigsymbol" id="bannerSymbol">P</div>
+    </div>
+
+    <!-- Search Row -->
+    <div class="search-row" id="searchRow">
+      <input type="text" id="searchInput" placeholder="Search entries across all days..." aria-label="Search entries" />
+      <button class="btn-ghost mono" data-action="clear-search" style="font-size: 11px;">CLEAR</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs" id="tabs" role="tablist" aria-label="Days of the week"></div>
+
+    <!-- Panel -->
+    <div class="panel" id="dayPanel" role="tabpanel" aria-labelledby="activeDayLabel">
+      <div class="panel-head">
+        <div>
+          <h2 class="serif" id="activeDayLabel">Monday</h2>
+          <div class="panel-date mono" id="activeDayDate">—</div>
+        </div>
+        <span class="mono" id="activeDayNet">P0.00</span>
+      </div>
+      <div class="cols">
+        <!-- Cash In -->
+        <div>
+          <div class="col-label in mono"><span>CASH IN</span><span id="inSubtotal">P0.00</span></div>
+          <div class="sort-row" id="inSortRow">
+            <button class="sort-btn mono" data-sort="in" data-order="time" data-action="sort-entries">TIME</button>
+            <button class="sort-btn mono" data-sort="in" data-order="amount-desc" data-action="sort-entries">HIGH <span class="icon" style="width:10px;height:10px;" data-icon="arrow-down"></span></button>
+            <button class="sort-btn mono" data-sort="in" data-order="amount-asc" data-action="sort-entries">LOW <span class="icon" style="width:10px;height:10px;" data-icon="arrow-up"></span></button>
+            <button class="sort-btn mono" data-sort="in" data-order="name" data-action="sort-entries">A-Z</button>
+          </div>
+          <div class="bulk-bar" id="inBulkBar">
+            <input type="checkbox" class="bulk-checkbox" id="inSelectAll" data-action="select-all" data-type="cashIn" />
+            <span class="mono" id="inSelectedCount">0 selected</span>
+            <button class="btn-clay mono" data-action="bulk-delete" data-type="cashIn" style="font-size: 10px; padding: 4px 8px;">DELETE</button>
+            <button class="btn-ghost mono" data-action="cancel-bulk" data-type="cashIn" style="font-size: 10px; padding: 4px 8px;">CANCEL</button>
+          </div>
+          <div class="list" id="cashInList"></div>
+          <div class="input-row">
+            <label class="sr-only" for="inLabel">Income source</label>
+            <input class="txt" id="inLabel" placeholder="Source (e.g. Project payment)" autocomplete="off" />
+            <label class="sr-only" for="inAmount">Income amount</label>
+            <input class="num" id="inAmount" placeholder="P" inputmode="decimal" autocomplete="off" />
+            <button class="add-btn in" data-action="add-cash-in" aria-label="Add income entry">
+              <span class="icon" style="width:16px;height:16px;" data-icon="plus"></span>
+            </button>
+          </div>
+          <div class="category-row">
+            <label class="mono">CAT:</label>
+            <select class="category-select" id="inCategory"></select>
+          </div>
+          <div class="recurring-row">
+            <label><input type="checkbox" id="inRecurring" /> <span class="mono">RECURRING WEEKLY</span></label>
+          </div>
+        </div>
+        <!-- Cash Out -->
+        <div>
+          <div class="col-label out mono"><span>CASH OUT</span><span id="outSubtotal">P0.00</span></div>
+          <div class="sort-row" id="outSortRow">
+            <button class="sort-btn mono" data-sort="out" data-order="time" data-action="sort-entries">TIME</button>
+            <button class="sort-btn mono" data-sort="out" data-order="amount-desc" data-action="sort-entries">HIGH <span class="icon" style="width:10px;height:10px;" data-icon="arrow-down"></span></button>
+            <button class="sort-btn mono" data-sort="out" data-order="amount-asc" data-action="sort-entries">LOW <span class="icon" style="width:10px;height:10px;" data-icon="arrow-up"></span></button>
+            <button class="sort-btn mono" data-sort="out" data-order="name" data-action="sort-entries">A-Z</button>
+          </div>
+          <div class="bulk-bar" id="outBulkBar">
+            <input type="checkbox" class="bulk-checkbox" id="outSelectAll" data-action="select-all" data-type="cashOut" />
+            <span class="mono" id="outSelectedCount">0 selected</span>
+            <button class="btn-clay mono" data-action="bulk-delete" data-type="cashOut" style="font-size: 10px; padding: 4px 8px;">DELETE</button>
+            <button class="btn-ghost mono" data-action="cancel-bulk" data-type="cashOut" style="font-size: 10px; padding: 4px 8px;">CANCEL</button>
+          </div>
+          <div class="list" id="cashOutList"></div>
+          <div class="input-row">
+            <label class="sr-only" for="outLabel">Expense description</label>
+            <input class="txt" id="outLabel" placeholder="Where it went (e.g. Groceries)" autocomplete="off" />
+            <label class="sr-only" for="outAmount">Expense amount</label>
+            <input class="num" id="outAmount" placeholder="P" inputmode="decimal" autocomplete="off" />
+            <button class="add-btn out" data-action="add-cash-out" aria-label="Add expense entry">
+              <span class="icon" style="width:16px;height:16px;" data-icon="plus"></span>
+            </button>
+          </div>
+          <div class="category-row">
+            <label class="mono">CAT:</label>
+            <select class="category-select" id="outCategory"></select>
+          </div>
+          <div class="recurring-row">
+            <label><input type="checkbox" id="outRecurring" /> <span class="mono">RECURRING WEEKLY</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== GOALS VIEW ==================== -->
+  <div class="view" id="view-goals" data-view="goals">
+    <div class="app-header">
+      <button class="header-back" data-action="navigate" data-view="home">
+        <span class="icon" data-icon="arrow-left"></span> Back
+      </button>
+      <h1 class="serif">Goals</h1>
+      <div style="width:60px;"></div>
+    </div>
+
+    <button class="btn-gold mono" style="width:100%; margin-bottom: 16px;" data-action="toggle-goal-form">
+      <span class="icon" style="width:14px;height:14px;" data-icon="plus"></span> NEW GOAL
+    </button>
+
+    <!-- Goal Form -->
+    <div class="goal-form" id="goalForm">
+      <div class="section-card">
+        <div class="modal-body" style="gap:10px; margin-bottom:0;">
+          <div>
+            <label class="mono" for="goalName">GOAL NAME</label>
+            <input type="text" id="goalName" placeholder="e.g. New Laptop" />
+          </div>
+          <div>
+            <label class="mono" for="goalTarget">TARGET AMOUNT</label>
+            <input type="text" id="goalTarget" inputmode="decimal" placeholder="0.00" />
+          </div>
+          <div>
+            <label class="mono" for="goalCategory">CATEGORY</label>
+            <select id="goalCategory"></select>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:14px;">
+          <button class="btn-sage mono" style="flex:1;" data-action="create-goal">CREATE</button>
+          <button class="btn-ghost mono" style="flex:1;" data-action="toggle-goal-form">CANCEL</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="goalsList"></div>
+  </div>
+
+  <!-- ==================== SETTINGS VIEW ==================== -->
+  <div class="view" id="view-settings" data-view="settings">
+    <div class="app-header">
+      <button class="header-back" data-action="navigate" data-view="home">
+        <span class="icon" data-icon="arrow-left"></span> Back
+      </button>
+      <h1 class="serif">Settings</h1>
+      <div style="width:60px;"></div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-label mono">CURRENCY</div>
+      <div class="settings-row">
+        <div>
+          <div class="sr-label">Display Currency</div>
+          <div class="sr-desc">Used for all amounts in the app</div>
+        </div>
+        <select class="currency-select mono" id="currencySelect" data-action="change-currency" aria-label="Select currency">
+          <option value="PHP">P PHP</option>
+          <option value="USD">$ USD</option>
+          <option value="EUR">E EUR</option>
+          <option value="GBP">L GBP</option>
+          <option value="JPY">Y JPY</option>
+          <option value="KRW">W KRW</option>
+          <option value="INR">R INR</option>
+          <option value="CNY">Y CNY</option>
+          <option value="THB">B THB</option>
+          <option value="VND">D VND</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-label mono">EXPORT</div>
+      <div class="export-grid">
+        <button class="export-btn" data-action="export-data">
+          <span class="icon" data-icon="download"></span> JSON Backup
+        </button>
+        <button class="export-btn" data-action="export-csv">
+          <span class="icon" data-icon="file-text"></span> Excel / CSV
+        </button>
+        <button class="export-btn" data-action="export-pdf">
+          <span class="icon" data-icon="printer"></span> PDF
+        </button>
+        <button class="export-btn" data-action="export-image">
+          <span class="icon" data-icon="image"></span> PNG Image
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-label mono">IMPORT</div>
+      <div class="settings-row">
+        <div>
+          <div class="sr-label">Restore from Backup</div>
+          <div class="sr-desc">Import a previously exported JSON file</div>
+        </div>
+        <button class="btn-ghost mono" data-action="import-data">
+          <span class="icon" style="width:14px;height:14px;" data-icon="upload"></span> IMPORT
+        </button>
+      </div>
+      <input type="file" id="importFile" accept=".json" style="display:none" />
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-label mono">MANAGE</div>
+      <div class="settings-row">
+        <div>
+          <div class="sr-label">Recurring Entries</div>
+          <div class="sr-desc">Edit or remove weekly recurring items</div>
+        </div>
+        <button class="btn-ghost mono" data-action="show-recurring">
+          <span class="icon" style="width:14px;height:14px;" data-icon="repeat"></span> MANAGE
+        </button>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="sr-label">Weekly Budget</div>
+          <div class="sr-desc">Set a spending limit for the week</div>
+        </div>
+        <button class="btn-ghost mono" data-action="show-budget-input">
+          <span class="icon" style="width:14px;height:14px;" data-icon="edit-3"></span> EDIT
+        </button>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="sr-label" style="color:var(--clay);">Reset Everything</div>
+          <div class="sr-desc">Clear all entries and start a new week</div>
+        </div>
+        <button class="btn-clay mono" data-action="show-reset">
+          <span class="icon" style="width:14px;height:14px;" data-icon="trash-2"></span> RESET
+        </button>
+      </div>
+    </div>
+
+    <div class="footer" id="footer">
+      <button class="install-btn mono" id="installBtn" data-action="install-pwa">
+        <span class="icon" style="width:14px;height:14px;" data-icon="package"></span> INSTALL APP
+      </button>
+      <br />
+      SAVED ON THIS DEVICE ONLY &middot; WORKS OFFLINE<br />
+      <span class="last-saved" id="lastSaved"></span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Bottom Navigation (Mobile) -->
+<nav class="bottom-nav" id="bottomNav" aria-label="Main navigation">
+  <button class="nav-btn active" data-action="navigate" data-view="home" data-nav="home">
+    <span class="icon nav-icon" data-icon="home"></span>
+    <span>Home</span>
+  </button>
+  <button class="nav-btn" data-action="navigate" data-view="ledger" data-nav="ledger">
+    <span class="icon nav-icon" data-icon="book"></span>
+    <span>Ledger</span>
+  </button>
+  <button class="nav-btn" data-action="navigate" data-view="goals" data-nav="goals">
+    <span class="icon nav-icon" data-icon="target"></span>
+    <span>Goals</span>
+  </button>
+  <button class="nav-btn" data-action="navigate" data-view="settings" data-nav="settings">
+    <span class="icon nav-icon" data-icon="sliders"></span>
+    <span>More</span>
+  </button>
+</nav>
+
+<script>
+// ==========================================
+// THE LEDGER v4 — Home Dashboard + View Router + Goals + SVG Icons
+// ==========================================
+
+// ===== SVG Icon Map =====
+const ICONS = {
+  home: `<svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+  book: `<svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
+  target: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
+  sliders: `<svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>`,
+  "arrow-left": `<svg viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`,
+  "arrow-right": `<svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`,
+  "arrow-up": `<svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`,
+  "arrow-down": `<svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`,
+  "arrow-down-left": `<svg viewBox="0 0 24 24"><line x1="17" y1="7" x2="7" y2="17"/><polyline points="17 17 7 17 7 7"/></svg>`,
+  "arrow-up-right": `<svg viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+  minus: `<svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+  x: `<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  "chevron-right": `<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`,
+  search: `<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+  "dollar-sign": `<svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
+  download: `<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+  upload: `<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+  "file-text": `<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
+  printer: `<svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`,
+  image: `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
+  repeat: `<svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`,
+  "edit-3": `<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
+  "trash-2": `<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`,
+  package: `<svg viewBox="0 0 24 24"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
+  "wifi-off": `<svg viewBox="0 0 24 24"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>`,
+  "alert-triangle": `<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+  "pencil": `<svg viewBox="0 0 24 24"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>`,
+  "check": `<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`,
+  "trending-up": `<svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`,
+  "trending-down": `<svg viewBox="0 0 24 24"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>`,
+};
+
+function renderIcons() {
+  document.querySelectorAll('[data-icon]').forEach(el => {
+    const key = el.dataset.icon;
+    if (ICONS[key]) {
+      el.innerHTML = ICONS[key];
+    }
+  });
+}
+
+// ===== Constants =====
+const DAYS = [
+  { key: "mon", label: "Monday", short: "Mon" },
+  { key: "tue", label: "Tuesday", short: "Tue" },
+  { key: "wed", label: "Wednesday", short: "Wed" },
+  { key: "thu", label: "Thursday", short: "Thu" },
+  { key: "fri", label: "Friday", short: "Fri" },
+  { key: "sat", label: "Saturday", short: "Sat" },
+  { key: "sun", label: "Sunday", short: "Sun" },
+];
+const DB_NAME = "ledger-db";
+const DB_VERSION = 1;
+const STORE_KEY = "ledger-state";
+const STORAGE_KEY = "ledger-data-v2";
+const CURRENCY_KEY = "ledger-currency";
+const BUDGET_KEY = "ledger-weekly-budget";
+const SCHEMA_VERSION = 4;
+
+const CURRENCY_MAP = {
+  PHP: { symbol: "\u20B1", locale: "en-PH" },
+  USD: { symbol: "$", locale: "en-US" },
+  EUR: { symbol: "\u20AC", locale: "en-DE" },
+  GBP: { symbol: "\u00A3", locale: "en-GB" },
+  JPY: { symbol: "\u00A5", locale: "ja-JP" },
+  KRW: { symbol: "\u20A9", locale: "ko-KR" },
+  INR: { symbol: "\u20B9", locale: "en-IN" },
+  CNY: { symbol: "\u00A5", locale: "zh-CN" },
+  THB: { symbol: "\u0E3F", locale: "th-TH" },
+  VND: { symbol: "\u20AB", locale: "vi-VN" },
+};
+
+const CATEGORIES = [
+  { key: "", label: "None", color: "transparent" },
+  { key: "food", label: "Food", color: "#e8a87c" },
+  { key: "transport", label: "Transport", color: "#7c9885" },
+  { key: "utilities", label: "Utilities", color: "#85b5e8" },
+  { key: "entertainment", label: "Fun", color: "#c49bd9" },
+  { key: "shopping", label: "Shopping", color: "#d4a574" },
+  { key: "health", label: "Health", color: "#d4787d" },
+  { key: "income", label: "Income", color: "#8ab89a" },
+  { key: "savings", label: "Savings", color: "#7cc9d4" },
+  { key: "other", label: "Other", color: "#a0a0a0" },
+];
+
+// ===== IndexedDB Wrapper =====
+let dbPromise = null;
+function initDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("state")) {
+        db.createObjectStore("state");
+      }
+    };
+  });
+  return dbPromise;
+}
+
+async function dbSet(key, value) {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("state", "readwrite");
+      const store = tx.objectStore("state");
+      const req = store.put(value, key);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn("IndexedDB write failed, falling back to localStorage:", e);
+    return safeSetItem(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+}
+
+async function dbGet(key) {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("state", "readonly");
+      const store = tx.objectStore("state");
+      const req = store.get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn("IndexedDB read failed, falling back to localStorage:", e);
+    const val = safeGetItem(key);
+    try { return JSON.parse(val); } catch { return val; }
+  }
+}
+
+function safeSetItem(key, value) {
+  try { localStorage.setItem(key, value); return true; }
+  catch (e) {
+    if (e.name === "QuotaExceededError") showToast("Storage full. Export & clear old data.", "error", 6000);
+    else showToast("Changes could not be saved.", "error");
+    console.error("localStorage save failed:", e);
+    return false;
+  }
+}
+
+function safeGetItem(key) {
+  try { return localStorage.getItem(key); }
+  catch (e) { console.error("localStorage read failed:", e); return null; }
+}
+
+// ===== Week anchor =====
+function getMondayOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function emptyWeek() {
+  const w = {};
+  DAYS.forEach(d => w[d.key] = { cashIn: [], cashOut: [] });
+  return w;
+}
+
+// ===== Validation =====
+function validateAmount(value) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  if (!/^\d+(\.\d{1,2})?$/.test(str)) return null;
+  const num = parseFloat(str);
+  if (isNaN(num) || !isFinite(num) || num <= 0) return null;
+  return Math.round(num * 100) / 100;
+}
+
+function validateBudget(value) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  if (!/^\d+(\.\d{1,2})?$/.test(str)) return null;
+  const num = parseFloat(str);
+  if (isNaN(num) || !isFinite(num) || num < 0) return null;
+  return Math.round(num * 100) / 100;
+}
+
+// ===== HTML Escaping =====
+function escapeHtml(str) {
+  if (str == null) return "";
+  const div = document.createElement("div");
+  div.textContent = String(str);
+  let html = div.innerHTML;
+  html = html.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  return html;
+}
+
+// ===== Currency =====
+function formatCurrency(n) {
+  const cfg = CURRENCY_MAP[state.currency] || CURRENCY_MAP.PHP;
+  const abs = Math.abs(n);
+  return cfg.symbol + abs.toLocaleString(cfg.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getCurrencySymbol() {
+  return (CURRENCY_MAP[state.currency] || CURRENCY_MAP.PHP).symbol;
+}
+
+// ===== Computations =====
+function dayTotal(key) {
+  const d = state.week[key];
+  const cashIn = d.cashIn.reduce((s, e) => s + e.amount, 0);
+  const cashOut = d.cashOut.reduce((s, e) => s + e.amount, 0);
+  return { cashIn, cashOut, net: cashIn - cashOut };
+}
+
+function weekTotals() {
+  let cashIn = 0, cashOut = 0;
+  DAYS.forEach(d => { const t = dayTotal(d.key); cashIn += t.cashIn; cashOut += t.cashOut; });
+  return { cashIn, cashOut, net: cashIn - cashOut };
+}
+
+function computeInsights() {
+  const totals = weekTotals();
+  let maxSpendDay = null, maxSpend = 0;
+  let maxEarnDay = null, maxEarn = 0;
+  let bestNetDay = null, bestNet = -Infinity;
+  const dayStats = DAYS.map(d => ({ ...d, ...dayTotal(d.key) }));
+  dayStats.forEach(d => {
+    if (d.cashOut > maxSpend) { maxSpend = d.cashOut; maxSpendDay = d.label; }
+    if (d.cashIn > maxEarn) { maxEarn = d.cashIn; maxEarnDay = d.label; }
+    if (d.net > bestNet) { bestNet = d.net; bestNetDay = d.label; }
+  });
+  const spendDays = dayStats.filter(d => d.cashOut > 0).length || 1;
+  const avgDailySpend = totals.cashOut / spendDays;
+  return { maxSpendDay, maxSpend, maxEarnDay, maxEarn, bestNetDay, bestNet, avgDailySpend, totals };
+}
+
+function getDayCalendarDate(dayKey) {
+  const monday = getMondayOfWeek(new Date(state.weekStarted));
+  const dayIndex = DAYS.findIndex(d => d.key === dayKey);
+  const date = new Date(monday);
+  date.setDate(monday.getDate() + dayIndex);
+  return date;
+}
+
+// ===== State Management =====
+let state = null;
+let activeDay = "mon";
+let currentView = "home";
+let insightsVisible = false;
+let undoStack = [];
+let editingEntry = null;
+let searchMode = false;
+let searchQuery = "";
+let sortState = { cashIn: "time", cashOut: "time" };
+let budget = 0;
+let pendingImportFile = null;
+let toastIdCounter = 0;
+let lastDayChange = 0;
+let bulkMode = { cashIn: false, cashOut: false };
+let selectedEntries = { cashIn: new Set(), cashOut: new Set() };
+let pendingGoalDeposit = null;
+let searchDebounceTimer = null;
+let stateInitialized = false;
+
+// ===== Schema Migration =====
+async function loadState() {
+  let data = null;
+  try { data = await dbGet(STORE_KEY); }
+  catch (e) { console.warn("DB load failed, trying localStorage:", e); }
+  if (!data) {
+    try { const raw = safeGetItem(STORAGE_KEY); if (raw) data = JSON.parse(raw); }
+    catch (e) {}
+  }
+  if (data) {
+    data = migrateSchema(data);
+    const week = data.week || emptyWeek();
+    let weekStarted = data.weekStarted;
+    if (weekStarted) {
+      const savedMonday = getMondayOfWeek(new Date(weekStarted));
+      weekStarted = savedMonday.toISOString();
+    } else {
+      weekStarted = getMondayOfWeek(new Date()).toISOString();
+    }
+    const recurring = data.recurring || { cashIn: [], cashOut: [] };
+    const currency = data.currency || safeGetItem(CURRENCY_KEY) || "PHP";
+    budget = data.budget || 0;
+    const goals = data.goals || [];
+    return { week, weekStarted, recurring, currency, goals };
+  }
+  return {
+    week: emptyWeek(),
+    weekStarted: getMondayOfWeek(new Date()).toISOString(),
+    recurring: { cashIn: [], cashOut: [] },
+    currency: safeGetItem(CURRENCY_KEY) || "PHP",
+    goals: [],
+  };
+}
+
+function migrateSchema(data) {
+  if (!data.schemaVersion) data.schemaVersion = 1;
+  if (data.schemaVersion < 2) {
+    DAYS.forEach(d => {
+      ["cashIn", "cashOut"].forEach(type => {
+        (data.week[d.key]?.[type] || []).forEach(e => {
+          if (!e.createdAt) e.createdAt = new Date().toISOString();
+        });
+      });
+    });
+    data.schemaVersion = 2;
+  }
+  if (data.schemaVersion < 3) {
+    data.schemaVersion = 3;
+  }
+  if (data.schemaVersion < 4) {
+    data.goals = [];
+    data.schemaVersion = 4;
+  }
+  return data;
+}
+
+async function saveState() {
+  const payload = {
+    week: state.week,
+    weekStarted: state.weekStarted,
+    recurring: state.recurring,
+    currency: state.currency,
+    budget: budget,
+    goals: state.goals,
+    schemaVersion: SCHEMA_VERSION,
+  };
+  try {
+    await dbSet(STORE_KEY, payload);
+    safeSetItem(CURRENCY_KEY, state.currency);
+    if (budget > 0) safeSetItem(BUDGET_KEY, String(budget));
+    updateLastSaved();
+    checkStorage();
+    return true;
+  } catch (e) {
+    console.error("Save failed:", e);
+    return false;
+  }
+}
+
+function updateLastSaved() {
+  const el = document.getElementById("lastSaved");
+  if (!el) return;
+  const now = new Date();
+  el.textContent = "Last saved: " + now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+
+async function checkStorage() {
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const estimate = await navigator.storage.estimate();
+      const used = estimate.usage || 0;
+      const quota = estimate.quota || (5 * 1024 * 1024);
+      const pct = (used / quota) * 100;
+      const warning = document.getElementById("storageWarning");
+      const warningText = document.getElementById("storageWarningText");
+      if (!warning || !warningText) return;
+      if (pct > 80) {
+        warning.classList.add("show");
+        warningText.textContent = `Storage ${pct.toFixed(0)}% full (${(used / 1024 / 1024).toFixed(1)}MB). Consider exporting & clearing.`;
+      } else {
+        warning.classList.remove("show");
+      }
+    }
+  } catch (e) {
+    try {
+      const used = JSON.stringify(localStorage).length * 2;
+      const max = 5 * 1024 * 1024;
+      const warning = document.getElementById("storageWarning");
+      if (warning && (used / max) > 0.85) warning.classList.add("show");
+    } catch (e2) {}
+  }
+}
+
+// ===== Toast =====
+function showToast(message, type = "info", duration = 3500, actionText = null, actionCallback = null) {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+  while (container.children.length >= 3) {
+    const oldest = container.children[0];
+    if (oldest._timer) clearTimeout(oldest._timer);
+    oldest.remove();
+  }
+  const id = "toast-" + (++toastIdCounter);
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.id = id;
+  let actionHtml = "";
+  if (actionText && actionCallback) {
+    actionHtml = `<button class="toast-action mono" data-toast-action="${id}">${escapeHtml(actionText)}</button>`;
+    toast._actionCallback = actionCallback;
+  }
+  toast.innerHTML = `<span class="toast-msg">${escapeHtml(message)}</span>${actionHtml}<button class="toast-close" data-toast-close="${id}" aria-label="Dismiss notification"><span class="icon" style="width:14px;height:14px;" data-icon="x"></span></button>`;
+  container.appendChild(toast);
+  renderIcons();
+  const timer = setTimeout(() => dismissToast(id), duration);
+  toast._timer = timer;
+}
+
+function dismissToast(id) {
+  const toast = document.getElementById(id);
+  if (!toast) return;
+  if (toast._timer) clearTimeout(toast._timer);
+  toast.classList.add("toast-out");
+  setTimeout(() => toast.remove(), 300);
+}
+
+function announce(message) {
+  const region = document.getElementById("liveRegion");
+  if (!region) return;
+  region.textContent = "";
+  setTimeout(() => { region.textContent = message; }, 100);
+}
+
+// ===== Undo =====
+function pushUndo(action) {
+  undoStack.push({ ...action, timestamp: Date.now() });
+  if (undoStack.length > 20) undoStack.shift();
+}
+
+function popUndo() {
+  const action = undoStack.pop();
+  if (!action) return false;
+  switch (action.type) {
+    case "DELETE": {
+      state.week[action.day][action.entryType] = [...state.week[action.day][action.entryType], action.entry];
+      break;
+    }
+    case "ADD": {
+      state.week[action.day][action.entryType] = state.week[action.day][action.entryType].filter(e => e.id !== action.entry.id);
+      break;
+    }
+    case "EDIT": {
+      const entries = state.week[action.day][action.entryType];
+      const idx = entries.findIndex(e => e.id === action.entry.id);
+      if (idx >= 0) entries[idx] = { ...action.previous };
+      break;
+    }
+    case "BULK_DELETE": {
+      action.entries.forEach(e => state.week[action.day][action.entryType].push(e));
+      break;
+    }
+    case "GOAL_DEPOSIT": {
+      const g = state.goals.find(g => g.id === action.goalId);
+      if (g) g.savedAmount = action.previousSaved;
+      break;
+    }
+    case "GOAL_CREATE": {
+      state.goals = state.goals.filter(g => g.id !== action.goal.id);
+      break;
+    }
+  }
+  saveState();
+  renderAll();
+  return true;
+}
+
+function generateId() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 9);
+}
+
+function getSortedEntries(day, type) {
+  const entries = [...state.week[day][type]];
+  const order = sortState[type];
+  switch (order) {
+    case "amount-desc": return entries.sort((a, b) => b.amount - a.amount);
+    case "amount-asc": return entries.sort((a, b) => a.amount - b.amount);
+    case "name": return entries.sort((a, b) => a.label.localeCompare(b.label));
+    default: return entries.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  }
+}
+
+function filterEntries(entries) {
+  if (!searchQuery) return entries;
+  const q = searchQuery.toLowerCase();
+  return entries.filter(e => e.label.toLowerCase().includes(q));
+}
+
+// ===== View Router =====
+function navigateTo(view) {
+  currentView = view;
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-btn, .top-nav-btn').forEach(b => b.classList.remove('active'));
+  const targetView = document.getElementById('view-' + view);
+  if (targetView) targetView.classList.add('active');
+  document.querySelectorAll(`[data-nav="${view}"]`).forEach(b => b.classList.add('active'));
+  renderAll();
+  window.scrollTo(0, 0);
+}
+
+// ===== Dispatch =====
+function dispatch(action, payload) {
+  if (!stateInitialized) {
+    showToast("App is still loading...", "info", 2000);
+    return;
+  }
+  switch (action) {
+    case "NAVIGATE": {
+      navigateTo(payload.view);
+      break;
+    }
+    case "QUICK_INCOME": {
+      navigateTo("ledger");
+      setTimeout(() => document.getElementById("inLabel")?.focus(), 200);
+      break;
+    }
+    case "QUICK_EXPENSE": {
+      navigateTo("ledger");
+      setTimeout(() => document.getElementById("outLabel")?.focus(), 200);
+      break;
+    }
+    case "ADD_ENTRY": {
+      const { type } = payload;
+      const labelEl = document.getElementById(type === "cashIn" ? "inLabel" : "outLabel");
+      const amountEl = document.getElementById(type === "cashIn" ? "inAmount" : "outAmount");
+      const recurringEl = document.getElementById(type === "cashIn" ? "inRecurring" : "outRecurring");
+      const categoryEl = document.getElementById(type === "cashIn" ? "inCategory" : "outCategory");
+      if (!labelEl || !amountEl) return;
+      const label = labelEl.value.trim();
+      const amount = validateAmount(amountEl.value);
+      if (!label) {
+        labelEl.setAttribute("aria-invalid", "true");
+        showToast("Please enter a description.", "error");
+        announce("Error: Please enter a description.");
+        labelEl.focus();
+        return;
+      }
+      labelEl.removeAttribute("aria-invalid");
+      if (amount === null) {
+        amountEl.setAttribute("aria-invalid", "true");
+        showToast("Please enter a valid positive amount (up to 2 decimal places).", "error");
+        announce("Error: Please enter a valid positive amount.");
+        amountEl.focus();
+        return;
+      }
+      amountEl.removeAttribute("aria-invalid");
+      const entry = {
+        id: generateId(), label, amount,
+        createdAt: new Date().toISOString(),
+        category: categoryEl?.value || "",
+      };
+      const prevState = JSON.parse(JSON.stringify(state.week));
+      state.week[activeDay][type] = [...state.week[activeDay][type], entry];
+      pushUndo({ type: "ADD", day: activeDay, entryType: type, entry });
+      if (recurringEl && recurringEl.checked) {
+        state.recurring[type] = [...state.recurring[type], { label, amount, category: categoryEl?.value || "" }];
+        recurringEl.checked = false;
+        showToast("Added as recurring weekly entry.", "info", 2500);
+      }
+      labelEl.value = "";
+      amountEl.value = "";
+      const saved = saveState();
+      if (!saved) {
+        state.week = prevState;
+        showToast("Failed to save. Please try again.", "error");
+        return;
+      }
+      renderDayPanel();
+      renderBanner();
+      renderTabs();
+      renderHome();
+      showToast(`${type === "cashIn" ? "Income" : "Expense"} added: ${formatCurrency(amount)}`, "success", 2500);
+      setTimeout(() => {
+        const list = document.getElementById(type === "cashIn" ? "cashInList" : "cashOutList");
+        if (list) list.scrollTop = list.scrollHeight;
+      }, 50);
+      if (!payload.keepFocus) labelEl.focus();
+      else amountEl.focus();
+      break;
+    }
+    case "REMOVE_ENTRY": {
+      const { type, id } = payload;
+      const entry = state.week[activeDay][type].find(e => e.id === id);
+      if (entry) {
+        pushUndo({ type: "DELETE", day: activeDay, entryType: type, entry: { ...entry } });
+        state.week[activeDay][type] = state.week[activeDay][type].filter(e => e.id !== id);
+        saveState();
+        renderDayPanel();
+        renderBanner();
+        renderTabs();
+        renderHome();
+        showToast("Entry removed", "info", 4000, "UNDO", () => {
+          const ok = popUndo();
+          if (ok) showToast("Entry restored", "success", 2000);
+        });
+      }
+      break;
+    }
+    case "START_EDIT": {
+      const { type, id } = payload;
+      const entry = state.week[activeDay][type].find(e => e.id === id);
+      if (!entry) return;
+      editingEntry = { type, id, previous: { ...entry } };
+      const modalTitle = document.getElementById("modalTitle");
+      const modalLabel = document.getElementById("modalLabel");
+      const modalAmount = document.getElementById("modalAmount");
+      const modalCategory = document.getElementById("modalCategory");
+      if (modalTitle) modalTitle.textContent = "Edit Entry";
+      if (modalLabel) { modalLabel.value = entry.label; }
+      if (modalAmount) { modalAmount.value = entry.amount.toFixed(2); }
+      if (modalCategory) {
+        modalCategory.innerHTML = CATEGORIES.map(c =>
+          `<option value="${c.key}" ${entry.category === c.key ? "selected" : ""}>${c.label}</option>`
+        ).join("");
+      }
+      const overlay = document.getElementById("modalOverlay");
+      if (overlay) overlay.classList.add("show");
+      setTimeout(() => {
+        if (modalLabel) { modalLabel.focus(); modalLabel.select(); }
+      }, 100);
+      setupFocusTrap("modalOverlay");
+      break;
+    }
+    case "SAVE_EDIT": {
+      if (!editingEntry) return;
+      const labelEl = document.getElementById("modalLabel");
+      const amountEl = document.getElementById("modalAmount");
+      if (!labelEl || !amountEl) return;
+      const label = labelEl.value.trim();
+      const amount = validateAmount(amountEl.value);
+      if (!label) {
+        labelEl.setAttribute("aria-invalid", "true");
+        showToast("Please enter a description.", "error");
+        return;
+      }
+      labelEl.removeAttribute("aria-invalid");
+      if (amount === null) {
+        amountEl.setAttribute("aria-invalid", "true");
+        showToast("Invalid amount.", "error");
+        return;
+      }
+      amountEl.removeAttribute("aria-invalid");
+      const entries = state.week[activeDay][editingEntry.type];
+      const entry = entries.find(e => e.id === editingEntry.id);
+      if (entry) {
+        pushUndo({ type: "EDIT", day: activeDay, entryType: editingEntry.type, entry: { ...entry }, previous: editingEntry.previous });
+        entry.label = label;
+        entry.amount = amount;
+        entry.category = document.getElementById("modalCategory")?.value || "";
+        entry.updatedAt = new Date().toISOString();
+        saveState();
+        renderDayPanel();
+        renderBanner();
+        renderHome();
+        showToast("Entry updated", "success", 2000);
+      }
+      editingEntry = null;
+      const overlay = document.getElementById("modalOverlay");
+      if (overlay) overlay.classList.remove("show");
+      removeFocusTrap();
+      break;
+    }
+    case "CANCEL_EDIT": {
+      editingEntry = null;
+      const overlay = document.getElementById("modalOverlay");
+      if (overlay) overlay.classList.remove("show");
+      removeFocusTrap();
+      break;
+    }
+    case "SET_DAY": {
+      const prevDay = activeDay;
+      activeDay = payload.day;
+      const panel = document.getElementById("dayPanel");
+      if (panel && prevDay !== activeDay) {
+        panel.classList.remove("animate");
+        void panel.offsetWidth;
+        panel.classList.add("animate");
+        lastDayChange = Date.now();
+      }
+      renderAll();
+      break;
+    }
+    case "SHOW_RESET": {
+      const box = document.getElementById("confirmBox");
+      if (box) box.classList.add("show");
+      break;
+    }
+    case "HIDE_RESET": {
+      const box = document.getElementById("confirmBox");
+      if (box) box.classList.remove("show");
+      break;
+    }
+    case "RESET_WEEK": {
+      const newWeek = emptyWeek();
+      DAYS.forEach(d => {
+        state.recurring.cashIn.forEach(r => {
+          newWeek[d.key].cashIn.push({
+            id: generateId(), label: r.label, amount: r.amount,
+            recurring: true, category: r.category || "", createdAt: new Date().toISOString()
+          });
+        });
+        state.recurring.cashOut.forEach(r => {
+          newWeek[d.key].cashOut.push({
+            id: generateId(), label: r.label, amount: r.amount,
+            recurring: true, category: r.category || "", createdAt: new Date().toISOString()
+          });
+        });
+      });
+      state.week = newWeek;
+      state.weekStarted = getMondayOfWeek(new Date()).toISOString();
+      activeDay = "mon";
+      undoStack = [];
+      const box = document.getElementById("confirmBox");
+      if (box) box.classList.remove("show");
+      saveState();
+      renderAll();
+      const hasRecurring = state.recurring.cashIn.length + state.recurring.cashOut.length;
+      if (hasRecurring > 0) showToast(`New week started with ${hasRecurring} recurring entries.`, "success", 3000);
+      else showToast("New week started.", "success", 2000);
+      break;
+    }
+    case "EXPORT": {
+      const data = {
+        version: SCHEMA_VERSION, exportedAt: new Date().toISOString(),
+        week: state.week, weekStarted: state.weekStarted,
+        recurring: state.recurring, currency: state.currency,
+        budget: budget, goals: state.goals,
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `ledger-${dateStr}.json`;
+      if (navigator.share && navigator.canShare) {
+        const file = new File([blob], `ledger-${dateStr}.json`, { type: "application/json" });
+        if (navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file], title: "Ledger Export" })
+            .then(() => showToast("Shared successfully.", "success", 2000))
+            .catch(() => { a.click(); showToast("Data exported successfully.", "success", 2500); });
+        } else { a.click(); showToast("Data exported successfully.", "success", 2500); }
+      } else { a.click(); showToast("Data exported successfully.", "success", 2500); }
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      break;
+    }
+    case "EXPORT_CSV": {
+      const rows = [];
+      rows.push(["Day", "Date", "Type", "Label", "Category", "Amount", "Currency"]);
+      DAYS.forEach(d => {
+        const date = getDayCalendarDate(d.key).toLocaleDateString("en-US");
+        state.week[d.key].cashIn.forEach(e => {
+          rows.push([d.label, date, "Income", e.label, e.category || "None", e.amount, state.currency]);
+        });
+        state.week[d.key].cashOut.forEach(e => {
+          rows.push([d.label, date, "Expense", e.label, e.category || "None", e.amount, state.currency]);
+        });
+      });
+      const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ledger-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast("Exported to CSV (opens in Excel)", "success", 2500);
+      break;
+    }
+    case "EXPORT_PDF": {
+      document.body.classList.add("printing");
+      window.print();
+      document.body.classList.remove("printing");
+      showToast("Save as PDF in the print dialog", "info", 3000);
+      break;
+    }
+    case "EXPORT_IMAGE": {
+      const banner = document.querySelector(".banner");
+      if (!banner || typeof html2canvas === 'undefined') {
+        showToast("Image library not loaded", "error");
+        return;
+      }
+      html2canvas(banner, { backgroundColor: "#1a2220", scale: 2 }).then(canvas => {
+        const link = document.createElement("a");
+        link.download = `ledger-summary-${new Date().toISOString().slice(0,10)}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+        showToast("Summary image saved", "success", 2500);
+      });
+      break;
+    }
+    case "IMPORT": {
+      const fileInput = document.getElementById("importFile");
+      if (fileInput) fileInput.click();
+      break;
+    }
+    case "IMPORT_FILE": {
+      pendingImportFile = payload.file;
+      const dialog = document.getElementById("mergeDialog");
+      if (dialog) dialog.classList.add("show");
+      break;
+    }
+    case "IMPORT_MERGE": {
+      if (!pendingImportFile) return;
+      processImport(pendingImportFile, true);
+      pendingImportFile = null;
+      const dialog = document.getElementById("mergeDialog");
+      if (dialog) dialog.classList.remove("show");
+      break;
+    }
+    case "IMPORT_REPLACE": {
+      if (!pendingImportFile) return;
+      processImport(pendingImportFile, false);
+      pendingImportFile = null;
+      const dialog = document.getElementById("mergeDialog");
+      if (dialog) dialog.classList.remove("show");
+      break;
+    }
+    case "IMPORT_CANCEL": {
+      pendingImportFile = null;
+      const fileInput = document.getElementById("importFile");
+      if (fileInput) fileInput.value = "";
+      const dialog = document.getElementById("mergeDialog");
+      if (dialog) dialog.classList.remove("show");
+      break;
+    }
+    case "CHANGE_CURRENCY": {
+      state.currency = payload.currency;
+      const bannerSymbol = document.getElementById("bannerSymbol");
+      if (bannerSymbol) bannerSymbol.textContent = getCurrencySymbol();
+      saveState();
+      renderAll();
+      showToast(`Currency set to ${payload.currency}`, "info", 2000);
+      break;
+    }
+    case "TOGGLE_INSIGHTS": {
+      insightsVisible = !insightsVisible;
+      const bar = document.getElementById("insightsBar");
+      if (bar) bar.classList.toggle("show", insightsVisible);
+      if (insightsVisible) renderInsights();
+      break;
+    }
+    case "JUMP_TODAY": {
+      const today = new Date();
+      const dayIdx = today.getDay();
+      const keyMap = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      const todayKey = keyMap[dayIdx];
+      dispatch("SET_DAY", { day: todayKey });
+      break;
+    }
+    case "SHOW_BUDGET_INPUT": {
+      const row = document.getElementById("budgetInputRow");
+      const toggle = document.getElementById("budgetToggle");
+      const input = document.getElementById("budgetInput");
+      if (row) row.style.display = "flex";
+      if (toggle) toggle.style.display = "none";
+      if (input) input.focus();
+      break;
+    }
+    case "HIDE_BUDGET_INPUT": {
+      const row = document.getElementById("budgetInputRow");
+      const toggle = document.getElementById("budgetToggle");
+      if (row) row.style.display = "none";
+      if (toggle) toggle.style.display = "inline-block";
+      break;
+    }
+    case "SET_BUDGET": {
+      const input = document.getElementById("budgetInput");
+      if (!input) return;
+      const val = validateBudget(input.value);
+      if (val !== null) {
+        budget = val;
+        saveState();
+        renderBudget();
+        renderHome();
+        dispatch("HIDE_BUDGET_INPUT");
+        showToast(`Weekly budget set to ${formatCurrency(budget)}`, "success", 2000);
+      } else {
+        showToast("Enter a valid budget amount.", "error");
+      }
+      break;
+    }
+    case "TOGGLE_SEARCH": {
+      searchMode = !searchMode;
+      const row = document.getElementById("searchRow");
+      const toggle = document.getElementById("searchToggle");
+      if (row) row.classList.toggle("show", searchMode);
+      if (toggle) toggle.classList.toggle("active", searchMode);
+      if (searchMode) {
+        setTimeout(() => document.getElementById("searchInput")?.focus(), 100);
+      } else {
+        searchQuery = "";
+        const searchInput = document.getElementById("searchInput");
+        if (searchInput) searchInput.value = "";
+        renderDayPanel();
+      }
+      break;
+    }
+    case "CLEAR_SEARCH": {
+      searchQuery = "";
+      const searchInput = document.getElementById("searchInput");
+      if (searchInput) searchInput.value = "";
+      renderDayPanel();
+      break;
+    }
+    case "SORT_ENTRIES": {
+      const { sort, order } = payload;
+      sortState[sort === "in" ? "cashIn" : "cashOut"] = order;
+      renderDayPanel();
+      break;
+    }
+    case "SHOW_RECURRING": {
+      renderRecurringList();
+      const overlay = document.getElementById("recurringOverlay");
+      if (overlay) overlay.classList.add("show");
+      setupFocusTrap("recurringOverlay");
+      break;
+    }
+    case "CLOSE_RECURRING": {
+      const overlay = document.getElementById("recurringOverlay");
+      if (overlay) overlay.classList.remove("show");
+      removeFocusTrap();
+      break;
+    }
+    case "DELETE_RECURRING": {
+      const { rType, index } = payload;
+      state.recurring[rType] = state.recurring[rType].filter((_, i) => i !== index);
+      saveState();
+      renderRecurringList();
+      showToast("Recurring entry removed.", "info", 2000);
+      break;
+    }
+    case "BULK_MODE": {
+      const bType = payload.type;
+      bulkMode[bType] = !bulkMode[bType];
+      selectedEntries[bType].clear();
+      renderDayPanel();
+      break;
+    }
+    case "SELECT_ALL": {
+      const { type: saType } = payload;
+      const allIds = state.week[activeDay][saType].map(e => e.id);
+      const allSelected = allIds.every(id => selectedEntries[saType].has(id));
+      if (allSelected) allIds.forEach(id => selectedEntries[saType].delete(id));
+      else allIds.forEach(id => selectedEntries[saType].add(id));
+      renderDayPanel();
+      break;
+    }
+    case "TOGGLE_SELECT": {
+      const { type: tsType, id } = payload;
+      if (selectedEntries[tsType].has(id)) selectedEntries[tsType].delete(id);
+      else selectedEntries[tsType].add(id);
+      renderDayPanel();
+      break;
+    }
+    case "BULK_DELETE": {
+      const { type: bdType } = payload;
+      const toDelete = Array.from(selectedEntries[bdType]);
+      if (toDelete.length === 0) return;
+      const deleted = state.week[activeDay][bdType].filter(e => toDelete.includes(e.id));
+      pushUndo({ type: "BULK_DELETE", day: activeDay, entryType: bdType, entries: deleted });
+      state.week[activeDay][bdType] = state.week[activeDay][bdType].filter(e => !toDelete.includes(e.id));
+      selectedEntries[bdType].clear();
+      bulkMode[bdType] = false;
+      saveState();
+      renderAll();
+      showToast(`${deleted.length} entries deleted.`, "info", 3000, "UNDO", () => {
+        const ok = popUndo();
+        if (ok) showToast("Entries restored.", "success", 2000);
+      });
+      break;
+    }
+    case "CANCEL_BULK": {
+      const cbType = payload.type;
+      bulkMode[cbType] = false;
+      selectedEntries[cbType].clear();
+      renderDayPanel();
+      break;
+    }
+    case "SHOW_SHORTCUTS": {
+      const overlay = document.getElementById("shortcutsOverlay");
+      if (overlay) overlay.classList.add("show");
+      setupFocusTrap("shortcutsOverlay");
+      break;
+    }
+    case "CLOSE_SHORTCUTS": {
+      const overlay = document.getElementById("shortcutsOverlay");
+      if (overlay) overlay.classList.remove("show");
+      removeFocusTrap();
+      break;
+    }
+    case "INSTALL_PWA": {
+      if (window.deferredPrompt) {
+        window.deferredPrompt.prompt();
+        window.deferredPrompt.userChoice.then(choice => {
+          if (choice.outcome === "accepted") showToast("App installed!", "success", 2000);
+          window.deferredPrompt = null;
+          const btn = document.getElementById("installBtn");
+          if (btn) btn.classList.remove("show");
+        });
+      }
+      break;
+    }
+    // ===== GOAL ACTIONS =====
+    case "TOGGLE_GOAL_FORM": {
+      const form = document.getElementById("goalForm");
+      if (form) form.classList.toggle("show");
+      break;
+    }
+    case "CREATE_GOAL": {
+      const nameEl = document.getElementById("goalName");
+      const targetEl = document.getElementById("goalTarget");
+      const catEl = document.getElementById("goalCategory");
+      if (!nameEl || !targetEl) return;
+      const name = nameEl.value.trim();
+      const target = validateAmount(targetEl.value);
+      if (!name) { showToast("Please enter a goal name.", "error"); return; }
+      if (target === null) { showToast("Please enter a valid target amount.", "error"); return; }
+      const goal = {
+        id: generateId(), name, targetAmount: target, savedAmount: 0,
+        category: catEl?.value || "", createdAt: new Date().toISOString(),
+      };
+      state.goals = [...state.goals, goal];
+      pushUndo({ type: "GOAL_CREATE", goal });
+      saveState();
+      nameEl.value = "";
+      targetEl.value = "";
+      dispatch("TOGGLE_GOAL_FORM");
+      renderGoals();
+      renderHome();
+      showToast(`Goal created: ${escapeHtml(name)}`, "success", 2500);
+      break;
+    }
+    case "DELETE_GOAL": {
+      const { id } = payload;
+      state.goals = state.goals.filter(g => g.id !== id);
+      saveState();
+      renderGoals();
+      renderHome();
+      showToast("Goal deleted.", "info", 2000);
+      break;
+    }
+    case "SHOW_GOAL_DEPOSIT": {
+      pendingGoalDeposit = payload.id;
+      const overlay = document.getElementById("goalDepositOverlay");
+      const title = document.getElementById("goalDepositTitle");
+      const input = document.getElementById("goalDepositAmount");
+      const goal = state.goals.find(g => g.id === payload.id);
+      if (title && goal) title.textContent = `Deposit to ${goal.name}`;
+      if (overlay) overlay.classList.add("show");
+      if (input) { input.value = ""; setTimeout(() => input.focus(), 100); }
+      setupFocusTrap("goalDepositOverlay");
+      break;
+    }
+    case "CONFIRM_GOAL_DEPOSIT": {
+      if (!pendingGoalDeposit) return;
+      const input = document.getElementById("goalDepositAmount");
+      if (!input) return;
+      const amount = validateAmount(input.value);
+      if (amount === null) { showToast("Enter a valid amount.", "error"); return; }
+      const goal = state.goals.find(g => g.id === pendingGoalDeposit);
+      if (!goal) return;
+      const previousSaved = goal.savedAmount;
+      goal.savedAmount = Math.min(goal.savedAmount + amount, goal.targetAmount);
+      pushUndo({ type: "GOAL_DEPOSIT", goalId: goal.id, previousSaved });
+      saveState();
+      const overlay = document.getElementById("goalDepositOverlay");
+      if (overlay) overlay.classList.remove("show");
+      removeFocusTrap();
+      pendingGoalDeposit = null;
+      renderGoals();
+      renderHome();
+      const pct = Math.round((goal.savedAmount / goal.targetAmount) * 100);
+      showToast(`Deposited ${formatCurrency(amount)} (${pct}% complete)`, "success", 2500);
+      if (pct >= 100) showToast(`Goal complete: ${escapeHtml(goal.name)}!`, "success", 4000);
+      break;
+    }
+    case "CANCEL_GOAL_DEPOSIT": {
+      pendingGoalDeposit = null;
+      const overlay = document.getElementById("goalDepositOverlay");
+      if (overlay) overlay.classList.remove("show");
+      removeFocusTrap();
+      break;
+    }
+    case "WITHDRAW_GOAL": {
+      const { id } = payload;
+      const goal = state.goals.find(g => g.id === id);
+      if (!goal || goal.savedAmount <= 0) return;
+      const previousSaved = goal.savedAmount;
+      goal.savedAmount = 0;
+      pushUndo({ type: "GOAL_DEPOSIT", goalId: id, previousSaved });
+      saveState();
+      renderGoals();
+      renderHome();
+      showToast("Funds withdrawn from goal.", "info", 2000);
+      break;
+    }
+  }
+}
+
+// ===== Import =====
+function processImport(file, merge) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.week || typeof data.week !== "object") throw new Error("Invalid file: missing week data");
+      DAYS.forEach(d => {
+        if (!data.week[d.key]) throw new Error(`Invalid file: missing ${d.label}`);
+        ["cashIn", "cashOut"].forEach(type => {
+          const entries = data.week[d.key][type] || [];
+          entries.forEach((entry, idx) => {
+            if (!entry.id || typeof entry.label !== "string" || typeof entry.amount !== "number") {
+              throw new Error(`Invalid entry in ${d.label} ${type} at index ${idx}`);
+            }
+          });
+        });
+      });
+      if (merge) {
+        DAYS.forEach(d => {
+          const existingIds = new Set(
+            state.week[d.key].cashIn.map(x => x.id).concat(state.week[d.key].cashOut.map(x => x.id))
+          );
+          (data.week[d.key].cashIn || []).forEach(entry => {
+            if (!existingIds.has(entry.id)) state.week[d.key].cashIn = [...state.week[d.key].cashIn, entry];
+          });
+          (data.week[d.key].cashOut || []).forEach(entry => {
+            if (!existingIds.has(entry.id)) state.week[d.key].cashOut = [...state.week[d.key].cashOut, entry];
+          });
+        });
+        showToast("Data merged successfully.", "success", 2500);
+      } else {
+        state.week = data.week;
+        if (data.weekStarted) state.weekStarted = data.weekStarted;
+        if (data.recurring) state.recurring = data.recurring;
+        if (data.currency) state.currency = data.currency;
+        if (data.budget) budget = data.budget;
+        if (data.goals) state.goals = data.goals;
+        showToast("Data imported successfully.", "success", 2500);
+      }
+      saveState();
+      renderAll();
+    } catch (err) {
+      showToast("Import failed: " + err.message, "error", 4000);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ===== Render Functions =====
+function renderAll() {
+  try {
+    renderIcons();
+    renderHome();
+    renderBanner();
+    renderTabs();
+    renderDayPanel();
+    renderGoals();
+    renderFooter();
+    checkStorage();
+  } catch (e) {
+    console.error("Render error:", e);
+    showToast("Something went wrong. Please refresh.", "error", 5000);
+  }
+}
+
+function renderHome() {
+  if (currentView !== "home") return;
+  const greetingEl = document.getElementById("homeGreeting");
+  const dateEl = document.getElementById("homeDate");
+  const balanceEl = document.getElementById("homeBalance");
+  const trendEl = document.getElementById("homeTrend");
+  const symbolEl = document.getElementById("homeSymbol");
+  const goalsPreview = document.getElementById("goalsPreview");
+  const recentActivity = document.getElementById("recentActivity");
+  const weekPreview = document.getElementById("weekPreview");
+  const budgetCard = document.getElementById("homeBudgetCard");
+  const budgetText = document.getElementById("homeBudgetText");
+  const budgetFill = document.getElementById("homeBudgetFill");
+
+  if (!greetingEl || !dateEl || !balanceEl) return;
+
+  // Greeting
+  const hour = new Date().getHours();
+  let greeting = "GOOD EVENING";
+  if (hour < 12) greeting = "GOOD MORNING";
+  else if (hour < 18) greeting = "GOOD AFTERNOON";
+  greetingEl.textContent = greeting;
+
+  // Date
+  dateEl.textContent = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+
+  // Balance
+  const wt = weekTotals();
+  balanceEl.textContent = (wt.net < 0 ? "\u2212" : "") + formatCurrency(wt.net);
+  balanceEl.className = "hero-balance mono " + (wt.net >= 0 ? "pos" : "neg");
+
+  // Symbol
+  if (symbolEl) symbolEl.textContent = getCurrencySymbol();
+
+  // Trend
+  if (trendEl) {
+    const prevWeek = wt.cashIn - wt.cashOut;
+    if (prevWeek >= 0) {
+      trendEl.innerHTML = `<span class="icon" style="width:12px;height:12px;" data-icon="trending-up"></span> You're up ${formatCurrency(prevWeek)} this week`;
+      trendEl.style.color = "var(--sage)";
+    } else {
+      trendEl.innerHTML = `<span class="icon" style="width:12px;height:12px;" data-icon="trending-down"></span> You're down ${formatCurrency(Math.abs(prevWeek))} this week`;
+      trendEl.style.color = "var(--clay)";
+    }
+  }
+
+  // Goals Preview
+  if (goalsPreview) {
+    const activeGoals = state.goals.filter(g => g.savedAmount < g.targetAmount).slice(0, 3);
+    if (activeGoals.length === 0) {
+      goalsPreview.innerHTML = `<div class="goals-empty">No active goals. Create one to start saving!</div>`;
+    } else {
+      goalsPreview.innerHTML = activeGoals.map(g => {
+        const pct = Math.min((g.savedAmount / g.targetAmount) * 100, 100);
+        const cat = CATEGORIES.find(c => c.key === g.category);
+        return `
+          <div class="goal-card-mini" data-action="navigate" data-view="goals">
+            <div class="gc-name">${escapeHtml(g.name)}</div>
+            <div class="gc-amt mono">${formatCurrency(g.savedAmount)} / ${formatCurrency(g.targetAmount)}</div>
+            <div class="gc-bar"><div class="gc-fill" style="width: ${pct}%"></div></div>
+            <div class="gc-pct">${pct.toFixed(0)}%</div>
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  // Recent Activity
+  if (recentActivity) {
+    const allEntries = [];
+    DAYS.forEach(d => {
+      state.week[d.key].cashIn.forEach(e => allEntries.push({ ...e, day: d.label, dayKey: d.key, type: "cashIn" }));
+      state.week[d.key].cashOut.forEach(e => allEntries.push({ ...e, day: d.label, dayKey: d.key, type: "cashOut" }));
+    });
+    allEntries.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const recent = allEntries.slice(0, 5);
+    if (recent.length === 0) {
+      recentActivity.innerHTML = `<div class="empty">No transactions yet this week.</div>`;
+    } else {
+      recentActivity.innerHTML = recent.map(e => {
+        const sign = e.type === "cashIn" ? "+" : "\u2212";
+        const cls = e.type === "cashIn" ? "pos" : "neg";
+        return `
+          <div class="recent-row">
+            <span class="r-label">${escapeHtml(e.label)}<span class="r-day">${e.day}</span></span>
+            <span class="r-amt mono ${cls}">${sign}${formatCurrency(e.amount)}</span>
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  // Week Preview
+  if (weekPreview) {
+    weekPreview.innerHTML = DAYS.map(d => {
+      const t = dayTotal(d.key);
+      const hasEntries = state.week[d.key].cashIn.length || state.week[d.key].cashOut.length;
+      let cls = "empty";
+      let valStr = "\u2014";
+      if (hasEntries) {
+        if (t.net > 0) { cls = "pos"; valStr = "+" + formatCurrency(t.net); }
+        else if (t.net < 0) { cls = "neg"; valStr = "\u2212" + formatCurrency(Math.abs(t.net)); }
+        else { cls = "zero"; valStr = formatCurrency(0); }
+      }
+      return `<div class="wp-day ${cls}" data-action="navigate-to-day" data-day="${d.key}" role="button" tabindex="0">
+        <div class="wp-d">${d.short}</div>
+        <div class="wp-v mono">${valStr}</div>
+      </div>`;
+    }).join("");
+  }
+
+  // Budget Preview
+  if (budgetCard && budgetText && budgetFill) {
+    if (budget > 0) {
+      budgetCard.style.display = "block";
+      const pct = Math.min((wt.cashOut / budget) * 100, 100);
+      budgetFill.style.width = pct + "%";
+      budgetFill.className = "budget-bar-fill" + (pct >= 80 ? " danger" : pct >= 60 ? " warning" : "");
+      budgetText.textContent = `${formatCurrency(wt.cashOut)} / ${formatCurrency(budget)}`;
+    } else {
+      budgetCard.style.display = "none";
+    }
+  }
+}
+
+function renderBanner() {
+  const started = new Date(state.weekStarted);
+  const weekOfLabel = document.getElementById("weekOfLabel");
+  if (weekOfLabel) weekOfLabel.textContent = "WEEK OF " + started.toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
+
+  const wt = weekTotals();
+  const wtEl = document.getElementById("weekTotal");
+  if (wtEl) {
+    wtEl.textContent = (wt.net < 0 ? "\u2212" : "") + formatCurrency(wt.net);
+    wtEl.className = "total mono " + (wt.net >= 0 ? "pos" : "neg");
+  }
+  const weekIn = document.getElementById("weekIn");
+  const weekOut = document.getElementById("weekOut");
+  if (weekIn) weekIn.textContent = formatCurrency(wt.cashIn);
+  if (weekOut) weekOut.textContent = formatCurrency(wt.cashOut);
+  renderBudget();
+}
+
+function renderBudget() {
+  const container = document.getElementById("budgetContainer");
+  const fill = document.getElementById("budgetFill");
+  const text = document.getElementById("budgetText");
+  const toggle = document.getElementById("budgetToggle");
+  const wt = weekTotals();
+  if (budget > 0) {
+    if (container) container.classList.add("show");
+    if (toggle) toggle.textContent = "EDIT BUDGET";
+    const pct = Math.min((wt.cashOut / budget) * 100, 100);
+    if (fill) { fill.style.width = pct + "%"; fill.className = "budget-bar-fill" + (pct >= 80 ? " danger" : pct >= 60 ? " warning" : ""); }
+    if (text) text.textContent = `${formatCurrency(wt.cashOut)} / ${formatCurrency(budget)} (${pct.toFixed(0)}%)`;
+  } else {
+    if (container) container.classList.remove("show");
+    if (toggle) toggle.textContent = "SET BUDGET";
+  }
+}
+
+function renderTabs() {
+  const tabsEl = document.getElementById("tabs");
+  if (!tabsEl) return;
+  tabsEl.innerHTML = DAYS.map((d) => {
+    const has = state.week[d.key].cashIn.length || state.week[d.key].cashOut.length;
+    const isActive = d.key === activeDay;
+    const date = getDayCalendarDate(d.key);
+    const dateStr = date.getDate();
+    return `<button class="tab ${isActive ? 'active' : ''}"
+      role="tab" aria-selected="${isActive}" aria-controls="dayPanel"
+      id="tab-${d.key}" tabindex="${isActive ? 0 : -1}"
+      data-action="set-day" data-day="${d.key}">
+      <div class="d">${d.short.toUpperCase()}</div>
+      <div class="dot ${has ? 'has' : ''}"></div>
+      <div class="date-hint">${dateStr}</div>
+    </button>`;
+  }).join("");
+}
+
+function renderDayPanel() {
+  const meta = DAYS.find(d => d.key === activeDay);
+  const activeDayLabel = document.getElementById("activeDayLabel");
+  const activeDayDate = document.getElementById("activeDayDate");
+  const activeDayNet = document.getElementById("activeDayNet");
+  const inSubtotal = document.getElementById("inSubtotal");
+  const outSubtotal = document.getElementById("outSubtotal");
+
+  if (activeDayLabel) activeDayLabel.textContent = meta.label;
+  const calDate = getDayCalendarDate(activeDay);
+  if (activeDayDate) activeDayDate.textContent = calDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+
+  const at = dayTotal(activeDay);
+  if (activeDayNet) {
+    activeDayNet.textContent = (at.net < 0 ? "\u2212" : "") + formatCurrency(at.net);
+    activeDayNet.className = "mono " + (at.net >= 0 ? "pos" : "neg");
+  }
+  if (inSubtotal) inSubtotal.textContent = formatCurrency(at.cashIn);
+  if (outSubtotal) outSubtotal.textContent = formatCurrency(at.cashOut);
+
+  document.querySelectorAll('.sort-btn[data-sort="in"]').forEach(btn => {
+    btn.classList.toggle("active", sortState.cashIn === btn.dataset.order);
+  });
+  document.querySelectorAll('.sort-btn[data-sort="out"]').forEach(btn => {
+    btn.classList.toggle("active", sortState.cashOut === btn.dataset.order);
+  });
+
+  renderEntryList("cashInList", "cashIn");
+  renderEntryList("cashOutList", "cashOut");
+}
+
+function renderEntryList(containerId, type) {
+  const container = document.getElementById(containerId);
+  const bulkBar = document.getElementById(type === "cashIn" ? "inBulkBar" : "outBulkBar");
+  const sortRow = document.getElementById(type === "cashIn" ? "inSortRow" : "outSortRow");
+  if (!container) return;
+
+  if (bulkBar) bulkBar.classList.toggle("show", bulkMode[type]);
+  if (sortRow) sortRow.style.display = bulkMode[type] ? "none" : "flex";
+
+  if (bulkMode[type]) {
+    const countEl = document.getElementById(type === "cashIn" ? "inSelectedCount" : "outSelectedCount");
+    if (countEl) countEl.textContent = `${selectedEntries[type].size} selected`;
+  }
+
+  let entries = getSortedEntries(activeDay, type);
+  entries = filterEntries(entries);
+
+  if (entries.length === 0) {
+    const ctxMsg = searchQuery ? "No matches for your search." : (type === "cashIn" ? "What earned you money today?" : "First expense of the day?");
+    container.innerHTML = `
+      <div class="empty">
+        ${searchQuery ? "No matches found." : (type === "cashIn" ? "No earnings logged yet." : "No spending logged yet.")}
+        <div class="empty-context">${ctxMsg}</div>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = entries.map(e => {
+    const sign = type === 'cashIn' ? '+' : '\u2212';
+    const cls = type === 'cashIn' ? 'pos' : 'neg';
+    const recurringBadge = e.recurring ? '<span title="Recurring"><span class="icon" style="width:10px;height:10px;" data-icon="repeat"></span></span> ' : '';
+    const cat = CATEGORIES.find(c => c.key === (e.category || ""));
+    const catBadge = cat && cat.key ? `<span class="cat-badge" style="background:${cat.color}" title="${cat.label}"></span>` : '';
+    const catLabel = cat && cat.key ? `<span class="cat-label">${cat.label}</span>` : '';
+    const timeStr = e.createdAt ? `<span class="entry-time">${new Date(e.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>` : '';
+    const isSelected = selectedEntries[type].has(e.id);
+
+    if (bulkMode[type]) {
+      return `
+        <div class="row" data-entry-id="${e.id}" data-entry-type="${type}">
+          <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
+            <input type="checkbox" class="bulk-checkbox" ${isSelected ? "checked" : ""}
+              data-action="toggle-select" data-type="${type}" data-id="${e.id}" />
+            ${catBadge}<span class="label">${recurringBadge}${escapeHtml(e.label)}${catLabel}${timeStr}</span>
+          </div>
+          <div class="right">
+            <span class="amt mono ${cls}">${sign}${formatCurrency(e.amount)}</span>
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="row" data-entry-id="${e.id}" data-entry-type="${type}">
+        <span class="label" data-action="edit-entry" data-type="${type}" data-id="${e.id}">${catBadge}${recurringBadge}${escapeHtml(e.label)}${catLabel}${timeStr}</span>
+        <div class="right">
+          <span class="amt mono ${cls}">${sign}${formatCurrency(e.amount)}</span>
+          <div class="row-actions">
+            <button class="row-btn edit" data-action="edit-entry" data-type="${type}" data-id="${e.id}" aria-label="Edit ${escapeHtml(e.label)}"><span class="icon" style="width:12px;height:12px;" data-icon="pencil"></span></button>
+            <button class="row-btn del" data-action="remove-entry" data-type="${type}" data-id="${e.id}" aria-label="Delete ${escapeHtml(e.label)}"><span class="icon" style="width:12px;height:12px;" data-icon="x"></span></button>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+  renderIcons();
+}
+
+function renderGoals() {
+  if (currentView !== "goals") return;
+  const list = document.getElementById("goalsList");
+  if (!list) return;
+
+  if (state.goals.length === 0) {
+    list.innerHTML = `
+      <div class="goals-empty">
+        <span class="icon" data-icon="target"></span>
+        <div>No savings goals yet.</div>
+        <div style="font-size:11px; margin-top:4px;">Create your first goal to start tracking progress.</div>
+      </div>`;
+    renderIcons();
+    return;
+  }
+
+  const activeGoals = state.goals.filter(g => g.savedAmount < g.targetAmount);
+  const completedGoals = state.goals.filter(g => g.savedAmount >= g.targetAmount);
+
+  let html = "";
+  if (activeGoals.length > 0) {
+    html += `<div style="font-size:10px; letter-spacing:0.2em; color:var(--gold); margin-bottom:10px; text-transform:uppercase;">ACTIVE</div>`;
+    html += activeGoals.map(g => renderGoalItem(g)).join("");
+  }
+  if (completedGoals.length > 0) {
+    html += `<div style="font-size:10px; letter-spacing:0.2em; color:var(--sage); margin:20px 0 10px; text-transform:uppercase;">COMPLETED</div>`;
+    html += completedGoals.map(g => renderGoalItem(g, true)).join("");
+  }
+  list.innerHTML = html;
+  renderIcons();
+}
+
+function renderGoalItem(g, isCompleted = false) {
+  const pct = Math.min((g.savedAmount / g.targetAmount) * 100, 100);
+  const cat = CATEGORIES.find(c => c.key === g.category);
+  return `
+    <div class="goal-item">
+      <div class="gi-header">
+        <div>
+          <div class="gi-name">${escapeHtml(g.name)} ${cat ? `<span class="cat-badge" style="background:${cat.color}" title="${cat.label}"></span>` : ''}</div>
+          <div class="gi-target mono">Target: ${formatCurrency(g.targetAmount)}</div>
+        </div>
+        <div class="gi-actions">
+          ${!isCompleted ? `<button class="btn-sage mono" style="font-size:10px; padding:4px 8px;" data-action="show-goal-deposit" data-id="${g.id}">DEPOSIT</button>` : ''}
+          <button class="btn-ghost mono" style="font-size:10px; padding:4px 8px;" data-action="withdraw-goal" data-id="${g.id}">WITHDRAW</button>
+          <button class="row-btn del" data-action="delete-goal" data-id="${g.id}" aria-label="Delete ${escapeHtml(g.name)}"><span class="icon" style="width:12px;height:12px;" data-icon="x"></span></button>
+        </div>
+      </div>
+      <div class="goal-bar">
+        <div class="goal-bar-fill ${isCompleted ? 'complete' : ''}" style="width: ${pct}%; background: ${isCompleted ? 'var(--gold)' : 'var(--sage)'};"></div>
+      </div>
+      <div class="goal-stats">
+        <span>Saved: ${formatCurrency(g.savedAmount)}</span>
+        <span>${pct.toFixed(0)}%</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderRecurringList() {
+  const inList = document.getElementById("recurringInList");
+  const outList = document.getElementById("recurringOutList");
+  if (inList) {
+    if (state.recurring.cashIn.length === 0) {
+      inList.innerHTML = '<div class="recurring-empty">No recurring income entries.</div>';
+    } else {
+      inList.innerHTML = state.recurring.cashIn.map((r, i) => `
+        <div class="recurring-item">
+          <span>${escapeHtml(r.label)} \u2014 ${formatCurrency(r.amount)}</span>
+          <button class="row-btn del" data-action="delete-recurring" data-rtype="cashIn" data-index="${i}" aria-label="Remove ${escapeHtml(r.label)}"><span class="icon" style="width:12px;height:12px;" data-icon="x"></span></button>
+        </div>
+      `).join("");
+    }
+  }
+  if (outList) {
+    if (state.recurring.cashOut.length === 0) {
+      outList.innerHTML = '<div class="recurring-empty">No recurring expense entries.</div>';
+    } else {
+      outList.innerHTML = state.recurring.cashOut.map((r, i) => `
+        <div class="recurring-item">
+          <span>${escapeHtml(r.label)} \u2014 ${formatCurrency(r.amount)}</span>
+          <button class="row-btn del" data-action="delete-recurring" data-rtype="cashOut" data-index="${i}" aria-label="Remove ${escapeHtml(r.label)}"><span class="icon" style="width:12px;height:12px;" data-icon="x"></span></button>
+        </div>
+      `).join("");
+    }
+  }
+  renderIcons();
+}
+
+function renderInsights() {
+  if (!insightsVisible) return;
+  const ins = computeInsights();
+  const grid = document.getElementById("insightsGrid");
+  if (!grid) return;
+  const items = [];
+  if (ins.maxSpendDay) items.push({ label: "HIGHEST SPEND DAY", value: ins.maxSpendDay + " " + formatCurrency(ins.maxSpend) });
+  if (ins.maxEarnDay) items.push({ label: "BEST EARN DAY", value: ins.maxEarnDay + " " + formatCurrency(ins.maxEarn) });
+  if (ins.bestNetDay && ins.bestNet > 0) items.push({ label: "BEST DAY", value: ins.bestNetDay + " " + formatCurrency(ins.bestNet) });
+  if (ins.avgDailySpend > 0) items.push({ label: "AVG DAILY SPEND", value: formatCurrency(ins.avgDailySpend) });
+  if (ins.totals.cashOut > 0) items.push({ label: "TOTAL OUT", value: formatCurrency(ins.totals.cashOut) });
+  if (ins.totals.cashIn > 0) items.push({ label: "TOTAL IN", value: formatCurrency(ins.totals.cashIn) });
+  if (ins.totals.net !== 0) items.push({
+    label: "NET POSITION",
+    value: (ins.totals.net < 0 ? "\u2212" : "") + formatCurrency(Math.abs(ins.totals.net)),
+    cls: ins.totals.net >= 0 ? "pos" : "neg"
+  });
+
+  grid.innerHTML = items.map(item => `
+    <div class="insight-item">
+      <div class="insight-label mono">${item.label}</div>
+      <div class="insight-value mono ${item.cls || ''}">${item.value}</div>
+    </div>
+  `).join("");
+}
+
+function renderFooter() {
+  updateLastSaved();
+}
+
+// ===== Focus Trap =====
+let focusTrapCleanup = null;
+let focusTrapReturnElement = null;
+
+function setupFocusTrap(overlayId) {
+  removeFocusTrap();
+  focusTrapReturnElement = document.activeElement;
+  const overlay = document.getElementById(overlayId);
+  if (!overlay) return;
+  const getTabbable = () => Array.from(overlay.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )).filter(el => !el.disabled && el.offsetParent !== null);
+  const handleKeyDown = (e) => {
+    if (e.key !== "Tab") return;
+    const tabbable = getTabbable();
+    if (tabbable.length === 0) return;
+    const first = tabbable[0];
+    const last = tabbable[tabbable.length - 1];
+    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+    else { if (document.activeElement === last) { e.preventDefault(); first.focus(); } }
+  };
+  overlay.addEventListener("keydown", handleKeyDown);
+  focusTrapCleanup = () => { overlay.removeEventListener("keydown", handleKeyDown); };
+}
+
+function removeFocusTrap() {
+  if (focusTrapCleanup) { focusTrapCleanup(); focusTrapCleanup = null; }
+  if (focusTrapReturnElement) { focusTrapReturnElement.focus(); focusTrapReturnElement = null; }
+}
+
+// ===== Category Selectors =====
+function populateCategorySelectors() {
+  const html = CATEGORIES.map(c => `<option value="${c.key}">${c.label}</option>`).join("");
+  const inCat = document.getElementById("inCategory");
+  const outCat = document.getElementById("outCategory");
+  const goalCat = document.getElementById("goalCategory");
+  if (inCat) inCat.innerHTML = html;
+  if (outCat) outCat.innerHTML = html;
+  if (goalCat) goalCat.innerHTML = html;
+}
+
+// ===== Event Delegation =====
+document.addEventListener("click", e => {
+  const target = e.target.closest("[data-action]");
+  if (!target) return;
+  const action = target.dataset.action;
+  switch (action) {
+    case "navigate": dispatch("NAVIGATE", { view: target.dataset.view }); break;
+    case "navigate-to-day": dispatch("NAVIGATE", { view: "ledger" }); dispatch("SET_DAY", { day: target.dataset.day }); break;
+    case "quick-income": dispatch("QUICK_INCOME"); break;
+    case "quick-expense": dispatch("QUICK_EXPENSE"); break;
+    case "add-cash-in": dispatch("ADD_ENTRY", { type: "cashIn" }); break;
+    case "add-cash-out": dispatch("ADD_ENTRY", { type: "cashOut" }); break;
+    case "remove-entry": dispatch("REMOVE_ENTRY", { type: target.dataset.type, id: target.dataset.id }); break;
+    case "edit-entry": dispatch("START_EDIT", { type: target.dataset.type, id: target.dataset.id }); break;
+    case "set-day": dispatch("SET_DAY", { day: target.dataset.day }); break;
+    case "show-reset": dispatch("SHOW_RESET"); break;
+    case "hide-reset": dispatch("HIDE_RESET"); break;
+    case "reset-week": dispatch("RESET_WEEK"); break;
+    case "export-data": dispatch("EXPORT"); break;
+    case "export-csv": dispatch("EXPORT_CSV"); break;
+    case "export-pdf": dispatch("EXPORT_PDF"); break;
+    case "export-image": dispatch("EXPORT_IMAGE"); break;
+    case "import-data": dispatch("IMPORT"); break;
+    case "modal-save": dispatch("SAVE_EDIT"); break;
+    case "modal-cancel": dispatch("CANCEL_EDIT"); break;
+    case "toggle-insights": dispatch("TOGGLE_INSIGHTS"); break;
+    case "show-budget-input": dispatch("SHOW_BUDGET_INPUT"); break;
+    case "hide-budget-input": dispatch("HIDE_BUDGET_INPUT"); break;
+    case "set-budget": dispatch("SET_BUDGET"); break;
+    case "toggle-search": dispatch("TOGGLE_SEARCH"); break;
+    case "clear-search": dispatch("CLEAR_SEARCH"); break;
+    case "sort-entries": dispatch("SORT_ENTRIES", { sort: target.dataset.sort, order: target.dataset.order }); break;
+    case "show-recurring": dispatch("SHOW_RECURRING"); break;
+    case "close-recurring": dispatch("CLOSE_RECURRING"); break;
+    case "delete-recurring": dispatch("DELETE_RECURRING", { rType: target.dataset.rtype, index: parseInt(target.dataset.index) }); break;
+    case "import-merge": dispatch("IMPORT_MERGE"); break;
+    case "import-replace": dispatch("IMPORT_REPLACE"); break;
+    case "import-cancel": dispatch("IMPORT_CANCEL"); break;
+    case "select-all": dispatch("SELECT_ALL", { type: target.dataset.type }); break;
+    case "toggle-select": dispatch("TOGGLE_SELECT", { type: target.dataset.type, id: target.dataset.id }); break;
+    case "bulk-delete": dispatch("BULK_DELETE", { type: target.dataset.type }); break;
+    case "cancel-bulk": dispatch("CANCEL_BULK", { type: target.dataset.type }); break;
+    case "close-shortcuts": dispatch("CLOSE_SHORTCUTS"); break;
+    case "install-pwa": dispatch("INSTALL_PWA"); break;
+    case "toggle-goal-form": dispatch("TOGGLE_GOAL_FORM"); break;
+    case "create-goal": dispatch("CREATE_GOAL"); break;
+    case "delete-goal": dispatch("DELETE_GOAL", { id: target.dataset.id }); break;
+    case "show-goal-deposit": dispatch("SHOW_GOAL_DEPOSIT", { id: target.dataset.id }); break;
+    case "confirm-goal-deposit": dispatch("CONFIRM_GOAL_DEPOSIT"); break;
+    case "cancel-goal-deposit": dispatch("CANCEL_GOAL_DEPOSIT"); break;
+    case "withdraw-goal": dispatch("WITHDRAW_GOAL", { id: target.dataset.id }); break;
+  }
+});
+
+// Toast actions
+document.addEventListener("click", e => {
+  const closeBtn = e.target.closest("[data-toast-close]");
+  if (closeBtn) { dismissToast(closeBtn.dataset.toastClose); return; }
+  const actionBtn = e.target.closest("[data-toast-action]");
+  if (actionBtn) {
+    const toast = document.getElementById(actionBtn.dataset.toastAction);
+    if (toast && toast._actionCallback) {
+      toast._actionCallback();
+      dismissToast(actionBtn.dataset.toastAction);
+    }
+  }
+});
+
+// Import file handler
+document.getElementById("importFile")?.addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (file) dispatch("IMPORT_FILE", { file });
+  e.target.value = "";
+});
+
+// Currency change
+document.getElementById("currencySelect")?.addEventListener("change", e => {
+  dispatch("CHANGE_CURRENCY", { currency: e.target.value });
+});
+
+// Search input with debounce
+document.getElementById("searchInput")?.addEventListener("input", e => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    searchQuery = e.target.value.trim().toLowerCase();
+    renderDayPanel();
+  }, 150);
+});
+
+// ===== Keyboard Shortcuts =====
+document.addEventListener("keydown", e => {
+  const tag = e.target.tagName;
+  const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+  const modalOpen = document.getElementById("modalOverlay")?.classList.contains("show");
+  const shortcutsOpen = document.getElementById("shortcutsOverlay")?.classList.contains("show");
+  const recurringOpen = document.getElementById("recurringOverlay")?.classList.contains("show");
+  const goalDepositOpen = document.getElementById("goalDepositOverlay")?.classList.contains("show");
+
+  if (modalOpen) {
+    if (e.key === "Escape") { dispatch("CANCEL_EDIT"); return; }
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { dispatch("SAVE_EDIT"); return; }
+    return;
+  }
+  if (shortcutsOpen || recurringOpen || goalDepositOpen) {
+    if (e.key === "Escape") {
+      if (shortcutsOpen) dispatch("CLOSE_SHORTCUTS");
+      if (recurringOpen) dispatch("CLOSE_RECURRING");
+      if (goalDepositOpen) dispatch("CANCEL_GOAL_DEPOSIT");
+      return;
+    }
+    return;
+  }
+
+  const confirmOpen = document.getElementById("confirmBox")?.classList.contains("show");
+  if (confirmOpen) {
+    if (e.key === "Escape") { dispatch("HIDE_RESET"); return; }
+    return;
+  }
+
+  if (e.key === "?" && !isInput) {
+    e.preventDefault();
+    dispatch("SHOW_SHORTCUTS");
+    return;
+  }
+
+  if (e.key === "f" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    dispatch("TOGGLE_SEARCH");
+    return;
+  }
+
+  if (!isInput) {
+    const dayIndex = DAYS.findIndex(d => d.key === activeDay);
+    if (e.key === "ArrowLeft" && dayIndex > 0) {
+      dispatch("SET_DAY", { day: DAYS[dayIndex - 1].key });
+      e.preventDefault();
+    }
+    if (e.key === "ArrowRight" && dayIndex < DAYS.length - 1) {
+      dispatch("SET_DAY", { day: DAYS[dayIndex + 1].key });
+      e.preventDefault();
+    }
+    if (e.key === "b" || e.key === "B") {
+      dispatch("BULK_MODE", { type: "cashIn" });
+    }
+  }
+
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (e.target.id === "modalLabel" || e.target.id === "modalAmount") {
+      dispatch("SAVE_EDIT");
+      return;
+    }
+  }
+
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    const tabEl = e.target.closest('[role="tab"]');
+    if (tabEl) {
+      const dayIdx = DAYS.findIndex(d => d.key === tabEl.dataset.day);
+      const nextIdx = e.key === "ArrowLeft" ? dayIdx - 1 : dayIdx + 1;
+      if (nextIdx >= 0 && nextIdx < DAYS.length) {
+        e.preventDefault();
+        dispatch("SET_DAY", { day: DAYS[nextIdx].key });
+        setTimeout(() => document.getElementById(`tab-${DAYS[nextIdx].key}`)?.focus(), 50);
+      }
+    }
+  }
+});
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") {
+    const glanceDay = e.target.closest('.wp-day[role="button"]');
+    if (glanceDay) {
+      e.preventDefault();
+      dispatch("NAVIGATE", { view: "ledger" });
+      dispatch("SET_DAY", { day: glanceDay.dataset.day });
+    }
+  }
+});
+
+// Input field Enter handlers
+document.getElementById("inLabel")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("inAmount")?.focus(); }
+});
+document.getElementById("inAmount")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") dispatch("ADD_ENTRY", { type: "cashIn", keepFocus: e.shiftKey });
+});
+document.getElementById("outLabel")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("outAmount")?.focus(); }
+});
+document.getElementById("outAmount")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") dispatch("ADD_ENTRY", { type: "cashOut", keepFocus: e.shiftKey });
+});
+document.getElementById("modalLabel")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("modalAmount")?.focus(); }
+});
+document.getElementById("modalAmount")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") dispatch("SAVE_EDIT");
+});
+document.getElementById("budgetInput")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") dispatch("SET_BUDGET");
+  if (e.key === "Escape") dispatch("HIDE_BUDGET_INPUT");
+});
+document.getElementById("goalDepositAmount")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") dispatch("CONFIRM_GOAL_DEPOSIT");
+  if (e.key === "Escape") dispatch("CANCEL_GOAL_DEPOSIT");
+});
+document.getElementById("goalName")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("goalTarget")?.focus(); }
+});
+document.getElementById("goalTarget")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") dispatch("CREATE_GOAL");
+});
+
+// ===== Service Worker =====
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js')
+    .then(reg => {
+      console.log('SW registered:', reg.scope);
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            showToast("Update available! Refresh to load the latest version.", "info", 8000, "REFRESH", () => { window.location.reload(); });
+          }
+        });
+      });
+    })
+    .catch(err => console.log('SW registration failed:', err));
+}
+
+// Install prompt
+deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  window.deferredPrompt = e;
+  const btn = document.getElementById("installBtn");
+  if (btn) btn.classList.add("show");
+});
+
+// Online status
+function updateOnlineStatus() {
+  const bar = document.getElementById("offlineBar");
+  if (bar) bar.classList.toggle("show", !navigator.onLine);
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+
+// Before unload
+window.addEventListener('beforeunload', () => {
+  // Flush any pending saves
+});
+
+// ===== Initialization =====
+async function init() {
+  state = await loadState();
+  populateCategorySelectors();
+  if (!budget) {
+    const savedBudget = safeGetItem(BUDGET_KEY);
+    if (savedBudget) budget = parseFloat(savedBudget) || 0;
+  }
+  const currencySelect = document.getElementById("currencySelect");
+  if (currencySelect) currencySelect.value = state.currency;
+  const bannerSymbol = document.getElementById("bannerSymbol");
+  if (bannerSymbol) bannerSymbol.textContent = getCurrencySymbol();
+  updateOnlineStatus();
+  stateInitialized = true;
+  renderAll();
+  // Hide loading screen
+  const loadingScreen = document.getElementById("loadingScreen");
+  if (loadingScreen) loadingScreen.classList.add("hidden");
+  showToast("Welcome back. Your data is safe on this device.", "info", 2500);
+}
+
+init();
+</script>
+</body>
+</html>
